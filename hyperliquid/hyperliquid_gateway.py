@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 from urllib.parse import urlencode
 from hyperliquid.info import Info,Cloid
 from hyperliquid.utils import constants
-from hyperliquid.exchange import Exchange as HyperliquidExcahnge
+from hyperliquid.exchange import Exchange as HyperliquidExchange
 from time import sleep
 import eth_account
 from eth_account.signers.local import LocalAccount
@@ -141,7 +141,7 @@ class HyperliquidGateway(BaseGateway):
         proxy_port: str = log_account["port"]
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(eth_private_address)
-        self.exchange_info = HyperliquidExcahnge(account, REST_HOST, account_address=account.address, perp_dexs=None)
+        self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None)
         self.rest_api.connect(account_address,eth_private_address,proxy_host,proxy_port)
         self.ws_api.connect(account_address,eth_private_address,proxy_host,proxy_port)
         self.init_query()
@@ -409,9 +409,9 @@ class HyperliquidRestApi(RestClient):
         持仓查询回报
         """
         if not data:
-            for symol in self.gateway.ws_api.ticks:
+            for symbol in self.gateway.ws_api.ticks:
                 long_position = PositionData(
-                    symbol=symol,
+                    symbol=symbol,
                     exchange=Exchange.HYPERLIQUID,
                     direction=Direction.LONG,
                     volume=0,
@@ -421,7 +421,7 @@ class HyperliquidRestApi(RestClient):
                     gateway_name=self.gateway_name,
                 )
                 short_position = PositionData(
-                    symbol=symol,
+                    symbol=symbol,
                     exchange=Exchange.HYPERLIQUID,
                     direction=Direction.SHORT,
                     volume=0,
