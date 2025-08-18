@@ -16,6 +16,6 @@ pip install hyperliquid-python-sdk
 ```
 ### 🚫 架构说明
 
-> **注意**: VNPy 原生的 REST API 和 WebSocket API 在此集成中**仅作为接口框架存在**，实际的数据交互完全通过 Hyperliquid 官方 SDK 实现。
+> **注意**: VNPY 原生的 REST API 和 WebSocket API 在此集成中**仅作为接口框架存在**，实际的数据交互完全通过 Hyperliquid 官方 SDK 实现。
 
 > **注意**: account_address为钱包地址,eth_private_address为钱包私钥地址
