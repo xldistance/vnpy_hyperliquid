@@ -310,8 +310,10 @@ class HyperliquidRestApi(RestClient):
         """
         查询合约信息
         """
-        data = self.rest_info.meta()
-        self.on_query_contract(data)
+        perp_data = self.rest_info.meta()
+        self.on_query_perp_contract(perp_data)
+        spot_data = self.rest_info.spot_meta()
+        self.on_query_spot_contract(spot_data)
     # ----------------------------------------------------------------------------------------------------
     def set_leverage(self, symbol: str) -> None:
         """
@@ -495,17 +497,45 @@ class HyperliquidRestApi(RestClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
     # ----------------------------------------------------------------------------------------------------
-    def on_query_contract(self, data: dict):
+    def on_query_spot_contract(self,data:dict):
+        """
+        现货信息数据
+        """
+        for raw in data["tokens"]:
+            symbol:str = raw["name"]
+            max_decimal = 8
+            volume_decimal = raw["szDecimals"]
+            min_volume = 10 ** (-volume_decimal)
+            price_decimal = min(5,max_decimal - volume_decimal)
+            price_tick = 10 ** (-price_decimal)
+
+            contract: ContractData = ContractData(
+                symbol=symbol,
+                exchange=Exchange.HYPERLIQUID,
+                name=raw["name"],
+                price_tick=price_tick,
+                min_volume=min_volume,
+                size=10,
+                product=Product.FUTURES,
+                gateway_name=self.gateway_name,
+            )
+            self.gateway.on_contract(contract)
+        self.gateway.write_log(f"交易接口：{self.gateway_name}，现货信息查询成功")
+    # ----------------------------------------------------------------------------------------------------
+    def on_query_perp_contract(self, data: dict):
         """
         合约信息查询回报
         """
         for raw in data["universe"]:
+            symbol:str = raw["name"]
+            max_decimal = 6
             volume_decimal = raw["szDecimals"]
             min_volume = 10 ** (-volume_decimal)
-            price_decimal = min(5,6 - volume_decimal)
+            price_decimal = min(5,max_decimal - volume_decimal)
             price_tick = 10 ** (-price_decimal)
+
             contract: ContractData = ContractData(
-                symbol=raw["name"],
+                symbol=symbol,
                 exchange=Exchange.HYPERLIQUID,
                 name=raw["name"],
                 price_tick=price_tick,
