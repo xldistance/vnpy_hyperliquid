@@ -312,8 +312,8 @@ class HyperliquidRestApi(RestClient):
         """
         perp_data = self.rest_info.meta()
         self.on_query_perp_contract(perp_data)
-        spot_data = self.rest_info.spot_meta()
-        self.on_query_spot_contract(spot_data)
+        #spot_data = self.rest_info.spot_meta()
+        # self.on_query_spot_contract(spot_data)
     # ----------------------------------------------------------------------------------------------------
     def set_leverage(self, symbol: str) -> None:
         """
@@ -516,7 +516,7 @@ class HyperliquidRestApi(RestClient):
                 price_tick=price_tick,
                 min_volume=min_volume,
                 size=10,
-                product=Product.FUTURES,
+                product=Product.SPOT,
                 gateway_name=self.gateway_name,
             )
             self.gateway.on_contract(contract)
