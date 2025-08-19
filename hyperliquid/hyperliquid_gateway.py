@@ -390,6 +390,8 @@ class HyperliquidRestApi(RestClient):
         """
         现货资金回报
         """
+        if not data:
+            return
         data =data["balances"]
         if len(data) == 1:
             for symbol_exchange in self.gateway.ws_api.ticks:
@@ -994,3 +996,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
+
