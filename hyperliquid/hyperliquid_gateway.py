@@ -82,6 +82,8 @@ TRADE_DIRECTION_HYPERLIQUID2VT= {
     "Close Short":(Direction.LONG,Offset.CLOSE),
     "Buy":(Direction.LONG,Offset.NONE),
     "Sell":(Direction.SHORT,Offset.NONE),
+    "B":(Direction.LONG,Offset.NONE),
+    "A":(Direction.SHORT,Offset.NONE),
 }
 STATUS_MAP = {
             "open":Status.NOTTRADED,
@@ -139,8 +141,10 @@ class HyperliquidGateway(BaseGateway):
             log_account = hyperliquid_account
         account_address: str = log_account["account_address"]
         eth_private_address: str = log_account["eth_private_address"]
-        proxy_host: str = log_account["host"]
-        proxy_port: str = log_account["port"]
+        #proxy_host: str = log_account["host"]
+        #proxy_port: str = log_account["port"]
+        proxy_host: str = ""
+        proxy_port: str = ""
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(eth_private_address)
         self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None)
@@ -485,6 +489,8 @@ class HyperliquidRestApi(RestClient):
         """
         合约资金查询回报
         """
+        if not data:
+            return
         self.on_query_position(data["assetPositions"])
 
         account: AccountData = AccountData(
@@ -588,6 +594,8 @@ class HyperliquidRestApi(RestClient):
         """
         委托查询回报
         """
+        if not data:
+            return
         for raw in data:
             symbol = raw["coin"]
             if symbol.startswith("@"):
@@ -803,7 +811,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         发送ping
         """
         self.ping_count += 1
-        if self.ping_count < 10:
+        if self.ping_count < 30:
             return
         self.ping_count = 0
         self.send_packet({ "method": "ping" })
@@ -941,7 +949,12 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 exchange = Exchange.HYPESPOT
             else:
                 exchange = Exchange.HYPE
-            direction,offset = TRADE_DIRECTION_HYPERLIQUID2VT[raw["dir"]]
+            # 现货dir可能返回Spot Dust Conversion，此时用raw["side"]获取开平仓方向
+            if raw["dir"] == "Spot Dust Conversion":
+                direction_convert = raw["side"]
+            else:
+                direction_convert = raw["dir"]
+            direction,offset = TRADE_DIRECTION_HYPERLIQUID2VT[direction_convert]
             trade_data = TradeData(
                 symbol = symbol,
                 exchange= exchange,
@@ -996,4 +1009,3 @@ class HyperliquidWebsocketApi(WebsocketClient):
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
-
