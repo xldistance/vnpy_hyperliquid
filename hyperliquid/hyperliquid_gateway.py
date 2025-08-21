@@ -492,16 +492,16 @@ class HyperliquidRestApi(RestClient):
         if not data:
             return
         self.on_query_position(data["assetPositions"])
-
+        account_data = data["marginSummary"]
         account: AccountData = AccountData(
             accountid="USDC" + "_" + self.gateway_name,
-            balance=float(data["crossMarginSummary"]["totalRawUsd"]),
-            available=float(data["withdrawable"]),
+            balance=float(account_data["accountValue"]),
+            frozen=float(account_data["totalMarginUsed"]),
             datetime=get_local_datetime(data["time"]),
             file_name=self.gateway.account_file_name,
             gateway_name=self.gateway_name,
         )
-        account.frozen = account.balance - account.available
+        account.available = account.balance - account.frozen
         if account.balance:
             self.gateway.on_account(account)
             # 保存账户资金信息
@@ -1009,3 +1009,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
+
