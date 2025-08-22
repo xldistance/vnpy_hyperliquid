@@ -149,7 +149,7 @@ class HyperliquidGateway(BaseGateway):
         proxy_port: str = ""
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(eth_private_address)
-        self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None)
+        self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None,timeout=60)
         self.rest_api.connect(account_address,eth_private_address,proxy_host,proxy_port)
         self.ws_api.connect(account_address,eth_private_address,proxy_host,proxy_port)
         self.init_query()
@@ -304,7 +304,7 @@ class HyperliquidRestApi(RestClient):
         self.eth_private_address = eth_private_address
         self.connect_time = int(datetime.now().strftime("%Y%m%d%H%M%S"))
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
-        self.rest_info = Info(REST_HOST, skip_ws=True)
+        self.rest_info = Info(REST_HOST, skip_ws=True,timeout=60)
         self.start()
         self.gateway.write_log(f"交易接口：{self.gateway_name}，REST API启动成功")
         self.query_contract()
