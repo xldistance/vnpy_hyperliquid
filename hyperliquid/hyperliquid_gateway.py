@@ -610,6 +610,8 @@ class HyperliquidRestApi(RestClient):
         if not data:
             return
         for raw in data:
+            if not isinstance(raw,dict):
+                return
             symbol = raw["coin"]
             if (symbol.startswith("@") or symbol.endswith("/USDC")):
                 symbol = self.spot_name_symbol_map[symbol]
