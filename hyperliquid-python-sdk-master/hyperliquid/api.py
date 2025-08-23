@@ -37,8 +37,9 @@ class API:
             msg = f"HYPERLIQUID，请求超时，请求地址：{url}，错误信息：{ex}"
             write_log(msg)
         except ValueError:
-            write_log(f"HYPERLIQUID，REST API解析json出错，错误信息：{response.text}")
-            return {"error": f"Could not parse JSON: {response.text}"}
+            msg = f"HYPERLIQUID，REST API解析json出错，错误信息：{response.text}"
+            write_log(msg)
+            return {"error": msg}
         except Exception as ex:
             msg = f"HYPERLIQUID，REST API运行出错，请求地址：{url}，错误信息：{ex}"
             write_log(msg)
