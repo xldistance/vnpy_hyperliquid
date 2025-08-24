@@ -410,7 +410,7 @@ class HyperliquidRestApi(RestClient):
         if not data:
             return
         data =data["balances"]
-        if len(data) == 1:
+        if len(data) == 1 and data[0]["coin"] == "USDC":
             for symbol_exchange in self.gateway.ws_api.ticks:
                 symbol,exchange = symbol_exchange.split("_")
                 # 过滤期货合约
@@ -874,10 +874,12 @@ class HyperliquidWebsocketApi(WebsocketClient):
             subscribe_symbol = self.gateway.rest_api.spot_symbol_name_map[req.symbol]
         else:
             subscribe_symbol = req.symbol
+        address = self.gateway.exchange_info.wallet.address
         self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
         self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
-        self.ws_info.subscribe({"type": "userFills", "user": self.gateway.exchange_info.wallet.address}, self.on_trade)
-        self.ws_info.subscribe({"type": "orderUpdates", "user": self.gateway.exchange_info.wallet.address}, self.on_order)
+        self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
+        self.ws_info.subscribe({"type": "userFills", "user": address}, self.on_trade)
+        self.ws_info.subscribe({"type": "orderUpdates", "user": address}, self.on_order)
         if self.gateway.book_trade_status:
             self.ws_info.subscribe({"type": "bbo", "coin": subscribe_symbol}, self.on_bbo)
     # ----------------------------------------------------------------------------------------------------
@@ -886,6 +888,25 @@ class HyperliquidWebsocketApi(WebsocketClient):
         推送数据回报
         """
         pass
+    # ----------------------------------------------------------------------------------------------------
+    def on_asset_ctx(self,packet:dict) -> None:
+        """
+        收到合约基础参数(成交量，持仓量)回报
+        """
+        data = packet["data"]
+        symbol = data["coin"]
+
+        if (symbol.startswith("@") or symbol.endswith("/USDC")):
+            symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
+            exchange = Exchange.HYPESPOT
+        else:
+            exchange = Exchange.HYPE
+        tick = self.ticks.get(f"{symbol}_{exchange.value}")
+        if not tick:
+            return
+        tick.volume = float(data["ctx"]["dayBaseVlm"])  # 币计价成交量，dayNtlVlm 美元计价成交量
+        if "openInterest" in data["ctx"]:
+            tick.open_interest = float(data["ctx"]["openInterest"])
     # ----------------------------------------------------------------------------------------------------
     def on_bbo(self, packet: dict):
         """
@@ -1025,7 +1046,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 gateway_name=self.gateway_name,
             )
             # 添加部分成交委托状态
-            if order.status == Status.ALLTRADED and remain:
+            if order.status != Status.CANCELLED and remain:
                 order.status = Status.PARTTRADED
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
