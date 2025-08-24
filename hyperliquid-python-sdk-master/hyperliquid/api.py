@@ -56,6 +56,6 @@ class API:
             msg = f"HYPERLIQUID，REST API请求失败，请求地址：{response.url}，错误代码：{status_code}，错误信息：{text}"
             write_log(msg)
             # 502 bad gateway重启交易子进程
-            if status_code in [502]:
-                save_connection_status("HYPERLIQUID",False,msg)
+            # if status_code in [502]:
+                # save_connection_status("HYPERLIQUID",False,msg)
 
