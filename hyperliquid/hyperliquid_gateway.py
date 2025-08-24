@@ -677,7 +677,7 @@ class HyperliquidRestApi(RestClient):
                 name=name,
                 price_tick=price_tick,
                 min_volume=min_volume,
-                size=10,
+                size=1,
                 product=Product.SPOT,
                 gateway_name=self.gateway_name,
             )
@@ -704,7 +704,7 @@ class HyperliquidRestApi(RestClient):
                 name=raw["name"],
                 price_tick=price_tick,
                 min_volume=min_volume,
-                size=10,
+                size=float(raw["maxLeverage"]),     # 合约最大杠杆
                 product=Product.FUTURES,
                 gateway_name=self.gateway_name,
             )
