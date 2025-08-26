@@ -384,7 +384,7 @@ class HyperliquidRestApi(RestClient):
         if req.price > 100000:
             price = round(req.price)
         else:
-            price = round(float(f"{req.price:.5g}"), PRICE_DECIMAL_MAP[req.symbol])
+            price = round(float(f"{req.price:.5g}"), PRICE_DECIMAL_MAP[f"{req.symbol}_{req.exchange.value}"])
         if req.exchange == Exchange.HYPESPOT:
             symbol = self.spot_symbol_name_map[req.symbol]
         else:
@@ -679,7 +679,6 @@ class HyperliquidRestApi(RestClient):
             min_volume = 10 ** (-volume_decimal)
             price_decimal = max_decimal - volume_decimal
             price_tick = 10 ** (-price_decimal)
-            PRICE_DECIMAL_MAP[symbol] = price_decimal
             contract: ContractData = ContractData(
                 symbol=symbol,
                 exchange=Exchange.HYPESPOT,
@@ -690,6 +689,7 @@ class HyperliquidRestApi(RestClient):
                 product=Product.SPOT,
                 gateway_name=self.gateway_name,
             )
+            PRICE_DECIMAL_MAP[f"{contract.symbol}_{contract.exchange.value}"] = price_decimal
             self.gateway.on_contract(contract)
         self.spot_name_symbol_map = {v:k for k,v in self.spot_symbol_name_map.items()}
         self.spot_inited = True
@@ -706,7 +706,6 @@ class HyperliquidRestApi(RestClient):
             min_volume = 10 ** (-volume_decimal)
             price_decimal = max_decimal - volume_decimal
             price_tick = 10 ** (-price_decimal)
-            PRICE_DECIMAL_MAP[symbol] = price_decimal
             contract: ContractData = ContractData(
                 symbol=symbol,
                 exchange=Exchange.HYPE,
@@ -717,6 +716,7 @@ class HyperliquidRestApi(RestClient):
                 product=Product.FUTURES,
                 gateway_name=self.gateway_name,
             )
+            PRICE_DECIMAL_MAP[f"{contract.symbol}_{contract.exchange.value}"] = price_decimal
             self.gateway.on_contract(contract)
         self.gateway.write_log(f"交易接口：{self.gateway_name}，合约信息查询成功")
     # ----------------------------------------------------------------------------------------------------
