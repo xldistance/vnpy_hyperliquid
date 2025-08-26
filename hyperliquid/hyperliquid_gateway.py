@@ -102,6 +102,7 @@ class Security(Enum):
     NONE: int = 0
     SIGNED: int = 1
 SPOT_INDEX_NAME_MAP = {}
+PRICE_DECIMAL_MAP = {}
 # ----------------------------------------------------------------------------------------------------
 class HyperliquidGateway(BaseGateway):
     """vn.py用于对接HYPERLIQUID的交易接口"""
@@ -367,6 +368,9 @@ class HyperliquidRestApi(RestClient):
         """
         委托下单
         """
+        # 等待合约价格精度推送完成
+        while not PRICE_DECIMAL_MAP:
+            sleep(1)
         # 生成本地委托号
         new_order_id = str(self._new_order_id()).rjust(18, '0')
         orderid: str = "0x" + str(self.connect_time) + new_order_id
@@ -377,11 +381,16 @@ class HyperliquidRestApi(RestClient):
         is_buy = True if order.direction == Direction.LONG else False
         # 现货不支持reduce_only
         reduce_only = req.offset == Offset.CLOSE and req.exchange == Exchange.HYPE
+        if req.price > 100000:
+            price = round(req.price)
+        else:
+            price = round(float(f"{req.price:.5g}"), PRICE_DECIMAL_MAP[req.symbol])
         if req.exchange == Exchange.HYPESPOT:
             symbol = self.spot_symbol_name_map[req.symbol]
         else:
             symbol = req.symbol
-        data = self.gateway.exchange_info.order(symbol, is_buy, req.volume, req.price, {"limit": {"tif": "Gtc"}},reduce_only,cloid=Cloid(orderid))
+
+        data = self.gateway.exchange_info.order(symbol, is_buy, req.volume, price, {"limit": {"tif": "Gtc"}},reduce_only,cloid=Cloid(orderid))
         self.on_send_order(data,order)
         return order.vt_orderid
     # ----------------------------------------------------------------------------------------------------
@@ -669,11 +678,8 @@ class HyperliquidRestApi(RestClient):
             volume_decimal = raw["szDecimals"]
             min_volume = 10 ** (-volume_decimal)
             price_decimal = max_decimal - volume_decimal
-            price_tick = max( 
-                10 ** -min(5, price_decimal),  # 约束1: 有效数字≤5位
-                10 ** -(price_decimal)          # 约束2: 小数位数≤MAX_DECIMALS-szDecimals
-            )
-
+            price_tick = 10 ** (-price_decimal)
+            PRICE_DECIMAL_MAP[symbol] = price_decimal
             contract: ContractData = ContractData(
                 symbol=symbol,
                 exchange=Exchange.HYPESPOT,
@@ -699,11 +705,8 @@ class HyperliquidRestApi(RestClient):
             volume_decimal = raw["szDecimals"]
             min_volume = 10 ** (-volume_decimal)
             price_decimal = max_decimal - volume_decimal
-            price_tick = max( 
-                10 ** -min(5, price_decimal),  # 约束1: 有效数字≤5位
-                10 ** -(price_decimal)          # 约束2: 小数位数≤MAX_DECIMALS-szDecimals
-            )
-
+            price_tick = 10 ** (-price_decimal)
+            PRICE_DECIMAL_MAP[symbol] = price_decimal
             contract: ContractData = ContractData(
                 symbol=symbol,
                 exchange=Exchange.HYPE,
