@@ -668,8 +668,11 @@ class HyperliquidRestApi(RestClient):
             max_decimal = 8
             volume_decimal = raw["szDecimals"]
             min_volume = 10 ** (-volume_decimal)
-            price_decimal = min(5,max_decimal - volume_decimal)
-            price_tick = 10 ** (-price_decimal)
+            price_decimal = max_decimal - volume_decimal
+            price_tick = max( 
+                10 ** -min(5, price_decimal),  # 约束1: 有效数字≤5位
+                10 ** -(price_decimal)          # 约束2: 小数位数≤MAX_DECIMALS-szDecimals
+            )
 
             contract: ContractData = ContractData(
                 symbol=symbol,
@@ -695,8 +698,11 @@ class HyperliquidRestApi(RestClient):
             max_decimal = 6
             volume_decimal = raw["szDecimals"]
             min_volume = 10 ** (-volume_decimal)
-            price_decimal = min(5,max_decimal - volume_decimal)
-            price_tick = 10 ** (-price_decimal)
+            price_decimal = max_decimal - volume_decimal
+            price_tick = max( 
+                10 ** -min(5, price_decimal),  # 约束1: 有效数字≤5位
+                10 ** -(price_decimal)          # 约束2: 小数位数≤MAX_DECIMALS-szDecimals
+            )
 
             contract: ContractData = ContractData(
                 symbol=symbol,
