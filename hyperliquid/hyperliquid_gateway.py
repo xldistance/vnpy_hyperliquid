@@ -134,6 +134,8 @@ class HyperliquidGateway(BaseGateway):
         # 订阅逐笔成交数据状态
         self.book_trade_status: bool = False
         self.count:int = 0
+        # 系统委托单id和自定义委托单id映射字典
+        self.system_local_orderid_map = {}
     # ----------------------------------------------------------------------------------------------------
     def connect(self, log_account: dict = {}) -> None:
         """
@@ -274,7 +276,6 @@ class HyperliquidRestApi(RestClient):
         self.connect_time: int = 0
         self.account_date = None  # 账户日期
         self.accounts_info: Dict[str, dict] = {}
-        self.system_local_orderid_map = {}
         self.spot_inited = False # 现货信息查询状态
         self.spot_symbol_name_map = {}
         self.spot_name_symbol_map = {}
@@ -416,7 +417,7 @@ class HyperliquidRestApi(RestClient):
         """
         现货资金回报
         """
-        if not data:
+        if not data or "balances" not in data:
             return
         data =data["balances"]
         if len(data) == 1 and data[0]["coin"] == "USDC":
@@ -450,6 +451,7 @@ class HyperliquidRestApi(RestClient):
         else:
             for raw in data:
                 symbol = raw["coin"]
+                # 持仓过滤不可交易USDC
                 if symbol == "USDC":
                     continue
                 long_position = PositionData(
@@ -511,7 +513,7 @@ class HyperliquidRestApi(RestClient):
         """
         合约资金查询回报
         """
-        if not data:
+        if not data or "assetPositions" not in data:
             return
         self.on_query_position(data["assetPositions"])
         account_data = data["marginSummary"]
@@ -635,10 +637,10 @@ class HyperliquidRestApi(RestClient):
             elif volume > untrade_volume:
                 status = Status.PARTTRADED
             if "cloid" not in raw:
-                orderid = self.system_local_orderid_map.get(raw["oid"],raw["oid"])
+                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             else:
                 orderid = raw["cloid"]
-                self.system_local_orderid_map[raw["oid"]] = orderid
+                self.gateway.system_local_orderid_map[raw["oid"]] = orderid
             order: OrderData = OrderData(
                 orderid=orderid,
                 symbol=symbol,
@@ -659,6 +661,8 @@ class HyperliquidRestApi(RestClient):
         """
         现货信息数据
         """
+        if not data or "universe" not in data:
+            return
         # universe中tokens列表第一个值是tokens中的index，交易所下单需要使用universe中的name
         for raw in data["universe"]:
             SPOT_INDEX_NAME_MAP[raw["tokens"][0]] = raw["name"]
@@ -699,6 +703,8 @@ class HyperliquidRestApi(RestClient):
         """
         合约信息查询回报
         """
+        if not data or "universe" not in data:
+            return
         for raw in data["universe"]:
             symbol:str = raw["name"]
             max_decimal = 6
@@ -738,9 +744,9 @@ class HyperliquidRestApi(RestClient):
             self.gateway.write_log(f"合约：{order.vt_symbol}发送委托单失败，错误信息：{msg}")
         else:
             if "filled" in response:
-                self.system_local_orderid_map[response["filled"]["oid"]] = order.orderid
+                self.gateway.system_local_orderid_map[response["filled"]["oid"]] = order.orderid
             else:
-                self.system_local_orderid_map[response["resting"]["oid"]] = order.orderid
+                self.gateway.system_local_orderid_map[response["resting"]["oid"]] = order.orderid
     # ----------------------------------------------------------------------------------------------------
     def on_cancel_order(self, data:dict,req:CancelRequest) -> None:
         """
@@ -991,7 +997,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
             self.trade_ids.append(trade_id)
             if "cloid" in raw:
                 orderid = raw["cloid"]
-                self.gateway.rest_api.system_local_orderid_map[raw["oid"]] = orderid
+                self.gateway.system_local_orderid_map[raw["oid"]] = orderid
             else:
                 orderid = raw["oid"]
             symbol = raw["coin"]
@@ -1037,10 +1043,10 @@ class HyperliquidWebsocketApi(WebsocketClient):
             remain = float(raw["sz"])
             trade_volume = volume -remain
             if "cloid" not in raw:
-                orderid = self.gateway.rest_api.system_local_orderid_map.get(raw["oid"],raw["oid"])
+                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             else:
                 orderid = raw["cloid"]
-                self.gateway.rest_api.system_local_orderid_map[raw["oid"]] = orderid
+                self.gateway.system_local_orderid_map[raw["oid"]] = orderid
 
             order: OrderData = OrderData(
                 orderid=orderid,
@@ -1056,6 +1062,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
             )
             # 添加部分成交委托状态
             if order.status != Status.CANCELLED and remain > 0 and trade_volume > 0:
+                self.gateway.write_log(f"部分成交交易所数据:{packet}")
                 order.status = Status.PARTTRADED
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
