@@ -11,7 +11,7 @@ cd hyperliquid-python-sdk-master
 pip install .
 ```
 ### 🚫 重要
-> **注意**:默认使用代理api交易，去官方网页/更多/api里面创建代理api，不建议使用私钥交易避免私钥泄露
+> **注意**:默认使用代理api交易，去官方网页/更多/api里面创建代理api，不建议使用私钥交易避免私钥泄露。要使用私钥交易，赋值self.use_api_agent为False。
 
 ### 🚫 架构说明
 
