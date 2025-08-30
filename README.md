@@ -10,6 +10,9 @@
 cd hyperliquid-python-sdk-master
 pip install .
 ```
+### 🚫 重要
+> **注意**:默认使用代理api交易，去官方网页/更多/api里面创建代理api，不建议使用私钥交易避免私钥泄露
+
 ### 🚫 架构说明
 
 > **注意**: VNPY 原生的 REST API 和 WebSocket API 在此集成中**仅作为接口框架存在**，实际的数据交互完全通过 Hyperliquid 官方 SDK 实现。
@@ -57,35 +60,3 @@ def load_json(filename: str) -> Dict:
 
     lock_file = filepath.with_suffix(filepath.suffix + ".lock")
     with FileLock(lock_file):
-        try:
-            with open(filepath, mode="r", encoding="UTF-8") as file:
-                # json5读取数据太慢使用pyjson5读取
-                #data = json.load(file,allow_duplicate_keys=False)
-                data = jsonc.decode_io(file)
-        except Exception as err:
-            msg = f"文件：{filename}读取数据出错，错误信息：{err}"
-            write_log(msg)
-            data = {}
-        return data
-def save_json(filename: str, data: Union[List, Dict]):
-    """
-    保存数据到json文件
-    """
-
-    filepath = get_file_path(filename)
-    lock_file = filepath.with_suffix(filepath.suffix + ".lock")
-    with FileLock(lock_file):
-        try:
-            with open(filepath, mode="w", encoding="UTF-8") as file:
-                json.dump(data, file, sort_keys=True, indent=4, ensure_ascii=False,allow_duplicate_keys=False)
-                #pyjson5写入数据
-                #jsonc.encode_io(data,file,supply_bytes=False)
-        except Exception as err:
-            msg = f"文件：{filename}保存数据出错，错误信息：{err}"
-            write_log(msg)
-            if filename in monitor_names:
-                error_monitor.send_text(msg)
-            return
-```
-
-> **注意**: account_address为钱包地址,eth_private_address为钱包私钥地址
