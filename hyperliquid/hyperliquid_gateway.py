@@ -105,7 +105,9 @@ SPOT_INDEX_NAME_MAP = {}
 PRICE_DECIMAL_MAP = {}
 # ----------------------------------------------------------------------------------------------------
 class HyperliquidGateway(BaseGateway):
-    """vn.py用于对接HYPERLIQUID的交易接口"""
+    """
+    vn.py用于对接HYPERLIQUID的交易接口
+    """
 
     default_setting: Dict[str, Any] = {
         "key": "",
@@ -136,6 +138,8 @@ class HyperliquidGateway(BaseGateway):
         self.count:int = 0
         # 系统委托单id和自定义委托单id映射字典
         self.system_local_orderid_map = {}
+        # 是否使用代理api，默认使用代理api交易，避免泄露私钥，安全性更高
+        self.use_api_agent:bool = True
     # ----------------------------------------------------------------------------------------------------
     def connect(self, log_account: dict = {}) -> None:
         """
@@ -145,16 +149,21 @@ class HyperliquidGateway(BaseGateway):
             #log_account = hyperliquid_okx_account
             log_account = hyperliquid_binance_account
         account_address: str = log_account["account_address"]
-        eth_private_address: str = log_account["eth_private_address"]
+        private_address: str = log_account["private_address"]
         #proxy_host: str = log_account["host"]
         #proxy_port: str = log_account["port"]
         proxy_host: str = ""
         proxy_port: str = ""
         self.account_file_name = log_account["account_file_name"]
-        account: LocalAccount = eth_account.Account.from_key(eth_private_address)
-        self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None,timeout=60)
-        self.rest_api.connect(account_address,eth_private_address,proxy_host,proxy_port)
-        self.ws_api.connect(account_address,eth_private_address,proxy_host,proxy_port)
+        self.expire_date = datetime.strptime(log_account["expire_date"],"%Y-%m-%d")
+        account: LocalAccount = eth_account.Account.from_key(private_address)
+        if self.use_api_agent:
+            self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account_address, perp_dexs=None,timeout=60)
+        else:
+            self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None,timeout=60)
+        
+        self.rest_api.connect(account_address,private_address,proxy_host,proxy_port)
+        self.ws_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.init_query()
     # ----------------------------------------------------------------------------------------------------
     def subscribe(self, req: SubscribeRequest) -> None:
@@ -269,7 +278,7 @@ class HyperliquidRestApi(RestClient):
 
         # 保存用户登陆信息
         self.account_address: str = ""
-        self.eth_private_address: str = ""
+        self.private_address: str = ""
         # 生成委托单号加线程锁
         self.order_count: int = 0
         self.order_count_lock: Lock = Lock()
@@ -295,7 +304,7 @@ class HyperliquidRestApi(RestClient):
     def connect(
         self,
         account_address: str,
-        eth_private_address: str,
+        private_address: str,
         proxy_host: str,
         proxy_port: int,
     ) -> None:
@@ -303,7 +312,7 @@ class HyperliquidRestApi(RestClient):
         连接REST服务器
         """
         self.account_address = account_address
-        self.eth_private_address = eth_private_address
+        self.private_address = private_address
         self.connect_time = int(datetime.now().strftime("%Y%m%d%H%M%S"))
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.rest_info = Info(REST_HOST, skip_ws=True,timeout=60)
@@ -329,7 +338,10 @@ class HyperliquidRestApi(RestClient):
         """
         查询活动委托单
         """
-        data = self.rest_info.open_orders(self.gateway.exchange_info.wallet.address)
+        if self.gateway.use_api_agent:
+            data = self.rest_info.open_orders(self.account_address)
+        else:
+            data = self.rest_info.open_orders(self.gateway.exchange_info.wallet.address)
         self.on_query_order(data)
     # ----------------------------------------------------------------------------------------------------
     def query_contract(self) -> None:
@@ -831,12 +843,12 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.ping_count = 0
         self.trade_ids = [] # trade_id过滤
     # ----------------------------------------------------------------------------------------------------
-    def connect(self, account_address: str, eth_private_address: str, proxy_host: str, proxy_port: int) -> None:
+    def connect(self, account_address: str, private_address: str, proxy_host: str, proxy_port: int) -> None:
         """
         连接Websocket交易频道
         """
         self.account_address = account_address
-        self.eth_private_address = eth_private_address
+        self.private_address = private_address
         self.ws_info = Info(REST_HOST, skip_ws=False)
         self.init(WEBSOCKET_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.start()
@@ -889,7 +901,10 @@ class HyperliquidWebsocketApi(WebsocketClient):
             subscribe_symbol = self.gateway.rest_api.spot_symbol_name_map[req.symbol]
         else:
             subscribe_symbol = req.symbol
-        address = self.gateway.exchange_info.wallet.address
+        if self.gateway.use_api_agent:
+            address = self.account_address
+        else:
+            address = self.gateway.exchange_info.wallet.address
         self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
         self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
         self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
