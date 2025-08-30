@@ -155,7 +155,6 @@ class HyperliquidGateway(BaseGateway):
         proxy_host: str = ""
         proxy_port: str = ""
         self.account_file_name = log_account["account_file_name"]
-        self.expire_date = datetime.strptime(log_account["expire_date"],"%Y-%m-%d")
         account: LocalAccount = eth_account.Account.from_key(private_address)
         if self.use_api_agent:
             self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account_address, perp_dexs=None,timeout=60)
