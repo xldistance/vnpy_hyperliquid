@@ -237,6 +237,9 @@ class HyperliquidGateway(BaseGateway):
         """
         # 每秒查询一次永续账户资金
         self.query_account()
+        # 删除过期trade_ids
+        if len(self.ws_api.trade_ids) > 200:
+            self.ws_api.trade_ids.pop(0)
         function = self.query_functions.pop(0)
         function()
         self.query_functions.append(function)
@@ -1081,3 +1084,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
+
