@@ -21,8 +21,7 @@ class Info(API):
         skip_ws: Optional[bool] = False,
         meta: Optional[Meta] = None,
         spot_meta: Optional[SpotMeta] = None,
-        # Note that when perp_dexs is None, then "" is used as the perp dex. "" represents
-        # the original dex.
+        # 注意：当 perp_dexs 为 None 时，将使用 "" 作为永续合约交易所。"" 代表原始交易所。
         perp_dexs: Optional[List[str]] = None,
         timeout: Optional[float] = None,
     ):  # pylint: disable=too-many-locals
@@ -34,6 +33,7 @@ class Info(API):
 
         if spot_meta is None:
             spot_meta = self.spot_meta()
+
         if not spot_meta:
             return
         self.coin_to_asset = {}
@@ -41,7 +41,8 @@ class Info(API):
         self.asset_to_sz_decimals = {}
         if "universe" not in spot_meta:
             return
-        # spot assets start at 10000
+
+        # 现货资产从 10000 开始
         for spot_info in spot_meta["universe"]:
             asset = spot_info["index"] + 10000
             self.coin_to_asset[spot_info["name"]] = asset
@@ -59,7 +60,7 @@ class Info(API):
             perp_dexs = [""]
         else:
             for i, perp_dex in enumerate(self.perp_dexs()[1:]):
-                # builder-deployed perp dexs start at 110000
+                # 构建者部署的永续合约交易所从 110000 开始
                 perp_dex_to_offset[perp_dex["name"]] = 110000 + i * 10000
 
         for perp_dex in perp_dexs:
@@ -79,19 +80,19 @@ class Info(API):
 
     def disconnect_websocket(self):
         if self.ws_manager is None:
-            raise RuntimeError("Cannot call disconnect_websocket since skip_ws was used")
+            raise RuntimeError("无法调用 disconnect_websocket，因为使用了 skip_ws")
         else:
             self.ws_manager.stop()
 
     def user_state(self, address: str, dex: str = "") -> Any:
-        """Retrieve trading details about a user.
+        """获取用户的交易详情。
 
         POST /info
 
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns:
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回：
             {
                 assetPositions: [
                     {
@@ -101,7 +102,7 @@ class Info(API):
                             leverage: {
                                 type: "cross" | "isolated",
                                 value: int,
-                                rawUsd: float string  # only if type is "isolated"
+                                rawUsd: float string  # 仅当类型为 "isolated" 时
                             },
                             liquidationPx: Optional[float string]
                             marginUsed: float string,
@@ -118,7 +119,7 @@ class Info(API):
                 withdrawable: float string,
             }
 
-            where MarginSummary is {
+            其中 MarginSummary 是 {
                     accountValue: float string,
                     totalMarginUsed: float string,
                     totalNtlPos: float string,
@@ -131,14 +132,14 @@ class Info(API):
         return self.post("/info", {"type": "spotClearinghouseState", "user": address})
 
     def open_orders(self, address: str, dex: str = "") -> Any:
-        """Retrieve a user's open orders.
+        """获取用户的未成交订单。
 
         POST /info
 
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns: [
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回： [
             {
                 coin: str,
                 limitPx: float string,
@@ -152,18 +153,18 @@ class Info(API):
         return self.post("/info", {"type": "openOrders", "user": address, "dex": dex})
 
     def frontend_open_orders(self, address: str, dex: str = "") -> Any:
-        """Retrieve a user's open orders with additional frontend info.
+        """获取用户的未成交订单及额外的前端信息。
 
         POST /info
 
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns: [
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回： [
             {
                 children:
                     [
-                        dict of frontend orders
+                        前端订单字典
                     ]
                 coin: str,
                 isPositionTpsl: bool,
@@ -185,29 +186,29 @@ class Info(API):
         return self.post("/info", {"type": "frontendOpenOrders", "user": address, "dex": dex})
 
     def all_mids(self, dex: str = "") -> Any:
-        """Retrieve all mids for all actively traded coins.
+        """获取所有活跃交易币种的中间价。
 
         POST /info
 
-        Returns:
+        返回：
             {
               ATOM: float string,
               BTC: float string,
-              any other coins which are trading: float string
+              其他正在交易的币种: float string
             }
         """
         return self.post("/info", {"type": "allMids", "dex": dex})
 
     def user_fills(self, address: str) -> Any:
-        """Retrieve a given user's fills.
+        """获取指定用户的成交记录。
 
         POST /info
 
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
 
-        Returns:
+        返回：
             [
               {
                 closedPnl: float string,
@@ -227,18 +228,21 @@ class Info(API):
         """
         return self.post("/info", {"type": "userFills", "user": address})
 
-    def user_fills_by_time(self, address: str, start_time: int, end_time: Optional[int] = None) -> Any:
-        """Retrieve a given user's fills by time.
+    def user_fills_by_time(
+        self, address: str, start_time: int, end_time: Optional[int] = None, aggregate_by_time: Optional[bool] = False
+    ) -> Any:
+        """按时间获取指定用户的成交记录。
 
         POST /info
 
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-            start_time (int): Unix timestamp in milliseconds
-            end_time (Optional[int]): Unix timestamp in milliseconds
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+            start_time (int): Unix时间戳（毫秒）
+            end_time (Optional[int]): Unix时间戳（毫秒）
+            aggregate_by_time (Optional[bool]): 当为true时，当一个交叉订单被多个不同的挂单成交时，部分成交会被合并。被多个交叉订单成交的挂单不会被聚合。
 
-        Returns:
+        返回：
             [
               {
                 closedPnl: float string,
@@ -257,15 +261,22 @@ class Info(API):
             ]
         """
         return self.post(
-            "/info", {"type": "userFillsByTime", "user": address, "startTime": start_time, "endTime": end_time}
+            "/info",
+            {
+                "type": "userFillsByTime",
+                "user": address,
+                "startTime": start_time,
+                "endTime": end_time,
+                "aggregateByTime": aggregate_by_time,
+            },
         )
 
     def meta(self, dex: str = "") -> Meta:
-        """Retrieve exchange perp metadata
+        """获取交易所永续合约元数据
 
         POST /info
 
-        Returns:
+        返回：
             {
                 universe: [
                     {
@@ -279,11 +290,11 @@ class Info(API):
         return cast(Meta, self.post("/info", {"type": "meta", "dex": dex}))
 
     def meta_and_asset_ctxs(self) -> Any:
-        """Retrieve exchange MetaAndAssetCtxs
+        """获取交易所元数据和资产上下文
 
         POST /info
 
-        Returns:
+        返回：
             [
                 {
                     universe: [
@@ -317,11 +328,11 @@ class Info(API):
         return self.post("/info", {"type": "perpDexs"})
 
     def spot_meta(self) -> SpotMeta:
-        """Retrieve exchange spot metadata
+        """获取交易所现货元数据
 
         POST /info
 
-        Returns:
+        返回：
             {
                 universe: [
                     {
@@ -348,9 +359,9 @@ class Info(API):
         return cast(SpotMeta, self.post("/info", {"type": "spotMeta"}))
 
     def spot_meta_and_asset_ctxs(self) -> SpotMetaAndAssetCtxs:
-        """Retrieve exchange spot asset contexts
+        """获取交易所现货资产上下文
         POST /info
-        Returns:
+        返回：
             [
                 {
                     universe: [
@@ -390,16 +401,16 @@ class Info(API):
         return cast(SpotMetaAndAssetCtxs, self.post("/info", {"type": "spotMetaAndAssetCtxs"}))
 
     def funding_history(self, name: str, startTime: int, endTime: Optional[int] = None) -> Any:
-        """Retrieve funding history for a given coin
+        """获取指定币种的资金费率历史
 
         POST /info
 
-        Args:
-            name (str): Coin to retrieve funding history for.
-            startTime (int): Unix timestamp in milliseconds.
-            endTime (int): Unix timestamp in milliseconds.
+        参数：
+            name (str): 要获取资金费率历史的币种。
+            startTime (int): Unix时间戳（毫秒）。
+            endTime (int): Unix时间戳（毫秒）。
 
-        Returns:
+        返回：
             [
                 {
                     coin: str,
@@ -418,32 +429,32 @@ class Info(API):
         return self.post("/info", {"type": "fundingHistory", "coin": coin, "startTime": startTime})
 
     def user_funding_history(self, user: str, startTime: int, endTime: Optional[int] = None) -> Any:
-        """Retrieve a user's funding history
+        """获取用户的资金费率历史
         POST /info
-        Args:
-            user (str): Address of the user in 42-character hexadecimal format.
-            startTime (int): Start time in milliseconds, inclusive.
-            endTime (int, optional): End time in milliseconds, inclusive. Defaults to current time.
-        Returns:
-            List[Dict]: A list of funding history records, where each record contains:
-                - user (str): User address.
-                - type (str): Type of the record, e.g., "userFunding".
-                - startTime (int): Unix timestamp of the start time in milliseconds.
-                - endTime (int): Unix timestamp of the end time in milliseconds.
+        参数：
+            user (str): 用户地址，42个字符的十六进制格式。
+            startTime (int): 开始时间（毫秒），包含。
+            endTime (int, optional): 结束时间（毫秒），包含。默认为当前时间。
+        返回：
+            List[Dict]: 资金费率历史记录列表，每条记录包含：
+                - user (str): 用户地址。
+                - type (str): 记录类型，例如 "userFunding"。
+                - startTime (int): 开始时间的Unix时间戳（毫秒）。
+                - endTime (int): 结束时间的Unix时间戳（毫秒）。
         """
         if endTime is not None:
             return self.post("/info", {"type": "userFunding", "user": user, "startTime": startTime, "endTime": endTime})
         return self.post("/info", {"type": "userFunding", "user": user, "startTime": startTime})
 
     def l2_snapshot(self, name: str) -> Any:
-        """Retrieve L2 snapshot for a given coin
+        """获取指定币种的二级订单簿快照
 
         POST /info
 
-        Args:
-            name (str): Coin to retrieve L2 snapshot for.
+        参数：
+            name (str): 要获取二级订单簿快照的币种。
 
-        Returns:
+        返回：
             {
                 coin: str,
                 levels: [
@@ -463,17 +474,17 @@ class Info(API):
         return self.post("/info", {"type": "l2Book", "coin": self.name_to_coin[name]})
 
     def candles_snapshot(self, name: str, interval: str, startTime: int, endTime: int) -> Any:
-        """Retrieve candles snapshot for a given coin
+        """获取指定币种的K线快照
 
         POST /info
 
-        Args:
-            name (str): Coin to retrieve candles snapshot for.
-            interval (str): Candlestick interval.
-            startTime (int): Unix timestamp in milliseconds.
-            endTime (int): Unix timestamp in milliseconds.
+        参数：
+            name (str): 要获取K线快照的币种。
+            interval (str): K线间隔。
+            startTime (int): Unix时间戳（毫秒）。
+            endTime (int): Unix时间戳（毫秒）。
 
-        Returns:
+        返回：
             [
                 {
                     T: int,
@@ -494,12 +505,12 @@ class Info(API):
         return self.post("/info", {"type": "candleSnapshot", "req": req})
 
     def user_fees(self, address: str) -> Any:
-        """Retrieve the volume of trading activity associated with a user.
+        """获取与用户相关的交易量活动。
         POST /info
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns:
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回：
             {
                 activeReferralDiscount: float string,
                 dailyUserVlm: [
@@ -537,12 +548,12 @@ class Info(API):
         return self.post("/info", {"type": "userFees", "user": address})
 
     def user_staking_summary(self, address: str) -> Any:
-        """Retrieve the staking summary associated with a user.
+        """获取与用户相关的质押摘要。
         POST /info
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns:
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回：
             {
                 delegated: float string,
                 undelegated: float string,
@@ -553,12 +564,12 @@ class Info(API):
         return self.post("/info", {"type": "delegatorSummary", "user": address})
 
     def user_staking_delegations(self, address: str) -> Any:
-        """Retrieve the user's staking delegations.
+        """获取用户的质押委托。
         POST /info
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns:
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回：
             [
                 {
                     validator: string,
@@ -570,12 +581,12 @@ class Info(API):
         return self.post("/info", {"type": "delegations", "user": address})
 
     def user_staking_rewards(self, address: str) -> Any:
-        """Retrieve the historic staking rewards associated with a user.
+        """获取与用户相关的历史质押奖励。
         POST /info
-        Args:
-            address (str): Onchain address in 42-character hexadecimal format;
-                            e.g. 0x0000000000000000000000000000000000000000.
-        Returns:
+        参数：
+            address (str): 链上地址，42个字符的十六进制格式；
+                            例如 0x0000000000000000000000000000000000000000。
+        返回：
             [
                 {
                     time: int,
@@ -585,6 +596,20 @@ class Info(API):
             ]
         """
         return self.post("/info", {"type": "delegatorRewards", "user": address})
+
+    def delegator_history(self, user: str) -> Any:
+        """获取用户的全面质押历史。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+
+        返回：
+            全面的质押历史，包括委托和取消委托事件，
+            带有时间戳、交易哈希和详细的增量信息。
+        """
+        return self.post("/info", {"type": "delegatorHistory", "user": user})
 
     def query_order_by_oid(self, user: str, oid: int) -> Any:
         return self.post("/info", {"type": "orderStatus", "user": user, "oid": oid})
@@ -604,6 +629,113 @@ class Info(API):
     def query_perp_deploy_auction_status(self) -> Any:
         return self.post("/info", {"type": "perpDeployAuctionStatus"})
 
+    def historical_orders(self, user: str) -> Any:
+        """获取用户的历史订单。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式；
+                        例如 0x0000000000000000000000000000000000000000。
+
+        返回：
+            最多返回2000条最近的历史订单，
+            包含其当前状态和详细的订单信息。
+        """
+        return self.post("/info", {"type": "historicalOrders", "user": user})
+
+    def user_non_funding_ledger_updates(self, user: str, startTime: int, endTime: Optional[int] = None) -> Any:
+        """获取用户的非资金费率账本更新。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+            startTime (int): 开始时间（毫秒，epoch时间戳）。
+            endTime (Optional[int]): 结束时间（毫秒，epoch时间戳）。
+
+        返回：
+            全面的账本更新，包括存款、取款、转账、
+            清算和其他账户活动，不包括资金费率支付。
+        """
+        return self.post(
+            "/info",
+            {"type": "userNonFundingLedgerUpdates", "user": user, "startTime": startTime, "endTime": endTime},
+        )
+
+    def portfolio(self, user: str) -> Any:
+        """获取全面的投资组合表现数据。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+
+        返回：
+            不同时间段的全面投资组合表现数据，
+            包括账户价值历史、盈亏历史和交易量指标。
+        """
+        return self.post("/info", {"type": "portfolio", "user": user})
+
+    def user_twap_slice_fills(self, user: str) -> Any:
+        """获取用户的TWAP分片成交记录。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+
+        返回：
+            最多返回2000条最近的TWAP分片成交记录，
+            包含详细的执行信息。
+        """
+        return self.post("/info", {"type": "userTwapSliceFills", "user": user})
+
+    def user_vault_equities(self, user: str) -> Any:
+        """获取用户在所有金库中的权益头寸。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+
+        返回：
+            用户在所有金库中的权益头寸的详细信息，
+            包括当前价值、盈亏指标和提款详情。
+        """
+        return self.post("/info", {"type": "userVaultEquities", "user": user})
+
+    def user_role(self, user: str) -> Any:
+        """获取用户的角色和账户类型信息。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+
+        返回：
+            角色和账户类型信息，包括账户结构、
+            权限以及在Hyperliquid生态系统中的关系。
+        """
+        return self.post("/info", {"type": "userRole", "user": user})
+
+    def user_rate_limit(self, user: str) -> Any:
+        """获取用户的API速率限制配置和使用情况。
+
+        POST /info
+
+        参数：
+            user (str): 链上地址，42个字符的十六进制格式。
+
+        返回：
+            用户API速率限制配置和当前使用情况的详细信息，
+            用于管理API使用并避免速率限制。
+        """
+        return self.post("/info", {"type": "userRateLimit", "user": user})
+
+    def query_spot_deploy_auction_status(self, user: str) -> Any:
+        return self.post("/info", {"type": "spotDeployState", "user": user})
+
     def _remap_coin_subscription(self, subscription: Subscription) -> None:
         if (
             subscription["type"] == "l2Book"
@@ -617,14 +749,14 @@ class Info(API):
     def subscribe(self, subscription: Subscription, callback: Callable[[Any], None]) -> int:
         self._remap_coin_subscription(subscription)
         if self.ws_manager is None:
-            raise RuntimeError("Cannot call subscribe since skip_ws was used")
+            raise RuntimeError("无法调用 subscribe，因为使用了 skip_ws")
         else:
             return self.ws_manager.subscribe(subscription, callback)
 
     def unsubscribe(self, subscription: Subscription, subscription_id: int) -> bool:
         self._remap_coin_subscription(subscription)
         if self.ws_manager is None:
-            raise RuntimeError("Cannot call unsubscribe since skip_ws was used")
+            raise RuntimeError("无法调用 unsubscribe，因为使用了 skip_ws")
         else:
             return self.ws_manager.unsubscribe(subscription, subscription_id)
 
