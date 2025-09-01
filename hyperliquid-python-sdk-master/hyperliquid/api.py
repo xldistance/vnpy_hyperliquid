@@ -22,40 +22,32 @@ class API:
         url = self.base_url + url_path
         try:
             response = self.session.post(url, json=payload, timeout=self.timeout)
-            self._handle_exception(response)
-            return response.json()
+            status_code = response.status_code
+            if status_code // 100 == 2:
+                if status_code == 204:
+                    json_body = {}
+                else:
+                    json_body = response.json()
+                return json_body
+            else:
+                text = response.text
+                # 收到null错误返回空字典
+                if text == "null":
+                    return {}
+                msg = f"REST API请求失败，请求地址：{url}，错误代码：{status_code}，错误信息：{text}"
+                write_log(msg,"HYPERLIQUID")
+                return {"error":text}
         except ConnectionError as ex:
-            msg = f"HYPERLIQUID，REST API连接断开，请求地址：{url}，错误信息：{ex}"
-            write_log(msg)
+            msg = f"REST API连接断开，请求地址：{url}，错误信息：{ex}"
+            write_log(msg,"HYPERLIQUID")
             # SSL连接重试次数超限
             if "Max retries exceeded" in str(ex):
                 save_connection_status("HYPERLIQUID",False,msg)
         except NameResolutionError as ex:
-            msg = f"HYPERLIQUID，DNS解析失败，无法解析域名，请求地址：{url}，错误信息：{ex}"
-            write_log(msg)
-        except Timeout as ex:
-            msg = f"HYPERLIQUID，请求超时，请求地址：{url}，错误信息：{ex}"
-            write_log(msg)
-        except ValueError:
-            msg = f"HYPERLIQUID，REST API解析json出错，错误信息：{response.text}"
-            write_log(msg)
-            return {"error": msg}
+            msg = f"DNS解析失败，无法解析域名，请求地址：{url}，错误信息：{ex}"
+            write_log(msg,"HYPERLIQUID")
         except Exception as ex:
-            msg = f"HYPERLIQUID，REST API运行出错，请求地址：{url}，错误信息：{ex}"
-            write_log(msg)
+            msg = f"REST API运行出错，请求地址：{url}，错误信息：{ex}"
+            write_log(msg,"HYPERLIQUID")
             save_connection_status("HYPERLIQUID",False,msg)
-
-    def _handle_exception(self, response):
-        status_code = response.status_code
-        if status_code < 400:
-            return
-        else:
-            text = response.text
-            if text == "null":
-                return
-            msg = f"HYPERLIQUID，REST API请求失败，请求地址：{response.url}，错误代码：{status_code}，错误信息：{text}"
-            write_log(msg)
-            # 502 bad gateway重启交易子进程
-            # if status_code in [502]:
-                # save_connection_status("HYPERLIQUID",False,msg)
 
