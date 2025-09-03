@@ -96,9 +96,9 @@ class WebsocketManager(threading.Thread):
         self.is_connected = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
-        self.reconnect_delay = 1  # 重连延迟（秒）
+        self.reconnect_delay = 0  # 重连延迟（秒）
         self.need_reconnect = False  # 新增：标记是否需要重连
-        
+        self.subscribed_types = {}
         # 初始化WebSocket连接
         self._create_websocket()
 
@@ -141,7 +141,7 @@ class WebsocketManager(threading.Thread):
             return False
             
         self.reconnect_attempts += 1
-        wait_time = min(self.reconnect_delay * self.reconnect_attempts, 30)  # 指数退避，最大30秒
+        wait_time = min(self.reconnect_delay * self.reconnect_attempts, 5)  # 指数退避，最大5秒
         
         write_log(f"WEBSOCKET API将在{wait_time}秒后尝试第{self.reconnect_attempts}次重连...","HYPERLIQUID")
         
@@ -317,19 +317,20 @@ class WebsocketManager(threading.Thread):
         self.is_connected = True
         self.need_reconnect = False
         self.reconnect_attempts = 0  # 重置重连次数
-        
+        self.subscription_id_counter = 0
+        self.subscribed_types.clear()
         # 启动ping线程
         self._start_ping_thread()
-        
         try:
             # 清空active_subscriptions，准备重新订阅
             self.active_subscriptions.clear()
             
-            # 恢复所有订阅
+            # 先取消订阅再订阅主题
             if self.all_subscriptions:
                 for subscription, active_subscription in self.all_subscriptions:
                     identifier = subscription_to_identifier(subscription)
                     self.active_subscriptions[identifier].append(active_subscription)
+                    self.ws.send(json.dumps({"method": "unsubscribe", "subscription": subscription}))
                     self.ws.send(json.dumps({"method": "subscribe", "subscription": subscription}))
 
             
@@ -354,30 +355,39 @@ class WebsocketManager(threading.Thread):
         if subscription_id is None:
             self.subscription_id_counter += 1
             subscription_id = self.subscription_id_counter
-            
-        active_sub = ActiveSubscription(callback, subscription_id)
+
+        # 为订阅创建唯一的标识符
+        identifier = subscription_to_identifier(subscription)
+
+        # 如果已经订阅过相同类型的订阅，跳过
+        if identifier in self.subscribed_types:
+            return subscription_id
         
+        # 标记该订阅已成功订阅
+        self.subscribed_types[identifier] = True
+
+        active_sub = ActiveSubscription(callback, subscription_id)
+
         if not self.ws_ready or not self.is_connected:
-            # 添加到队列，等待连接建立
+            # 如果WebSocket未准备好，则将订阅添加到队列中，等待连接
             self.queued_subscriptions.append((subscription, active_sub))
         else:
             try:
-                identifier = subscription_to_identifier(subscription)
                 self.active_subscriptions[identifier].append(active_sub)
                 self.ws.send(json.dumps({"method": "subscribe", "subscription": subscription}))
-                
-                # 保存到所有订阅列表（用于重连恢复）
-                # 检查是否已存在相同的subscription_id，避免重复
+
+                # 将订阅保存到所有订阅列表中（用于重连时恢复）
                 existing_ids = [sub[1].subscription_id for sub in self.all_subscriptions]
                 if subscription_id not in existing_ids:
                     self.all_subscriptions.append((subscription, active_sub))
-                    
-            except Exception as ex:
-                write_log(f"订阅失败: {ex}","HYPERLIQUID")
-                # 如果发送失败，添加到队列中等待重连后重新订阅
-                self.queued_subscriptions.append((subscription, active_sub))
-        return subscription_id
 
+            except Exception as ex:
+                write_log(f"订阅失败: {ex}", "HYPERLIQUID")
+                # 如果发送失败，将订阅添加到队列中，等待重连时重新订阅
+                self.queued_subscriptions.append((subscription, active_sub))
+
+        return subscription_id
+    
     def unsubscribe(self, subscription: Subscription, subscription_id: int) -> bool:
         """取消订阅WebSocket频道"""
         identifier = subscription_to_identifier(subscription)
