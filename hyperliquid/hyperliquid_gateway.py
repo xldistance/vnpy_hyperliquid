@@ -16,7 +16,6 @@ from urllib.parse import urlencode
 from hyperliquid.info import Info,Cloid
 from hyperliquid.utils import constants
 from hyperliquid.exchange import Exchange as HyperliquidExchange
-from time import sleep
 import eth_account
 from eth_account.signers.local import LocalAccount
 
@@ -58,7 +57,9 @@ from vnpy.trader.utility import (
     remain_alpha,
     remain_digit,
     save_connection_status,
+    load_json,
     save_json,
+    error_monitor
 )
 
 recording_list = GetFilePath.recording_list
@@ -107,6 +108,7 @@ PRICE_DECIMAL_MAP = {}
 class HyperliquidGateway(BaseGateway):
     """
     vn.py用于对接HYPERLIQUID的交易接口
+    仅适用于单向持仓
     """
 
     default_setting: Dict[str, Any] = {
@@ -140,6 +142,8 @@ class HyperliquidGateway(BaseGateway):
         self.system_local_orderid_map = {}
         # 是否使用代理api，默认使用代理api交易，避免泄露私钥，安全性更高
         self.use_api_agent:bool = True
+        # 是否创建代理api
+        self.generate_agent_api = False
     # ----------------------------------------------------------------------------------------------------
     def connect(self, log_account: dict = {}) -> None:
         """
@@ -149,21 +153,33 @@ class HyperliquidGateway(BaseGateway):
             #log_account = hyperliquid_okx_account
             log_account = hyperliquid_binance_account
         account_address: str = log_account["account_address"]
+
         private_address: str = log_account["private_address"]
-        #proxy_host: str = log_account["host"]
-        #proxy_port: str = log_account["port"]
+        # 代理api过期时间
+        self.expire_date = datetime.strptime(log_account["expire_date"],"%Y-%m-%d")
+
         proxy_host: str = ""
         proxy_port: str = ""
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(private_address)
-        if self.use_api_agent:
-            self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account_address, perp_dexs=None,timeout=60)
-        else:
-            self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account.address, perp_dexs=None,timeout=60)
+        account_address = account_address if self.use_api_agent else account.address
+        self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account_address, perp_dexs=None,timeout=60)
         
         self.rest_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.ws_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.init_query()
+
+        if self.generate_agent_api:
+            now_date = datetime.now()
+            if account_address == self.exchange_info.wallet.address:
+                expire_date = now_date + timedelta(days=180)
+                agent_result, agent_key = self.exchange_info.approve_agent(f"vnpy_{now_date.date()}")
+                if agent_result["status"] == "ok":
+                    save_json(f"hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_date":str(expire_date)})
+                else:
+                    self.write_log(f"创建代理失败，错误信息：{agent_result['response']}")
+            else:
+                self.write_log("不可以使用代理api创建代理api，必须使用私钥地址创建代理api")
     # ----------------------------------------------------------------------------------------------------
     def subscribe(self, req: SubscribeRequest) -> None:
         """
@@ -240,6 +256,7 @@ class HyperliquidGateway(BaseGateway):
         # 删除过期trade_ids
         if len(self.ws_api.trade_ids) > 200:
             self.ws_api.trade_ids.pop(0)
+        # 循环执行查询函数
         function = self.query_functions.pop(0)
         function()
         self.query_functions.append(function)
@@ -249,6 +266,12 @@ class HyperliquidGateway(BaseGateway):
             return
         self.count = 0
         self.rest_api.query_spot_account()
+        # 代理api过期7天前发送提醒到钉钉
+        remain_datetime = self.expire_date - datetime.now()
+        if remain_datetime <= timedelta(days = 15):
+            msg = f"交易接口：{self.gateway_name}，代理api有效时间剩余：{remain_datetime.days}天，请创建新的代理api"
+            self.write_log(msg)
+            error_monitor.send_text(msg)
     # ----------------------------------------------------------------------------------------------------
     def init_query(self):
         """ """
@@ -340,10 +363,8 @@ class HyperliquidRestApi(RestClient):
         """
         查询活动委托单
         """
-        if self.gateway.use_api_agent:
-            data = self.rest_info.open_orders(self.account_address)
-        else:
-            data = self.rest_info.open_orders(self.gateway.exchange_info.wallet.address)
+        account_address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
+        data = self.rest_info.open_orders(account_address)
         self.on_query_order(data)
     # ----------------------------------------------------------------------------------------------------
     def query_contract(self) -> None:
@@ -903,10 +924,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
             subscribe_symbol = self.gateway.rest_api.spot_symbol_name_map[req.symbol]
         else:
             subscribe_symbol = req.symbol
-        if self.gateway.use_api_agent:
-            address = self.account_address
-        else:
-            address = self.gateway.exchange_info.wallet.address
+        address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
         self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
         self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
         self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
@@ -1048,6 +1066,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         收到委托事件回报
         """
         data = packet["data"]
+        print(111,packet)
         for raw_data in data:
             raw =raw_data["order"]
             symbol=raw["coin"]
@@ -1084,4 +1103,3 @@ class HyperliquidWebsocketApi(WebsocketClient):
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
-
