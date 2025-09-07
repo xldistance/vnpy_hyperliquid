@@ -60,3 +60,51 @@ def load_json(filename: str) -> Dict:
 
     lock_file = filepath.with_suffix(filepath.suffix + ".lock")
     with FileLock(lock_file):
+from dingtalkchatbot.chatbot import DingtalkChatbot
+from datetime import datetime
+class SendMessage:
+    """
+    * 钉钉发送信息
+    * 过滤重复消息
+    """
+    # 信息推送webhook与密匙
+    info_webhook_1: str = "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+    info_webhook_2: str = "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+    info_secret: str = "xxx"
+    # 错误推送webhook与密匙
+    error_webhook_1: str = "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+    error_secret: str = "xxx"
+
+    def __init__(self, webhook: str, secret: str):
+        # 初始化机器人小丁
+        self.xiaoding = DingtalkChatbot(webhook, secret)
+        self.last_text: str = ""  # 缓存钉钉发送的信息
+    # ----------------------------------------------------------------------------------------------------
+    def send_text(self, text: str):
+        """
+        text消息，is_at_all=True @所有人
+        """
+        # 过滤发送相同信息
+        if self.last_text == text:
+            return
+        try:
+            self.xiaoding.send_text(msg=f"【监控时间：{datetime.now(TZ_INFO)}】" + "\n" + f"{text}")
+        except Exception as err:
+            write_log(f"钉钉发送消息失败，错误信息：{err}")
+        self.last_text = text
+    # ----------------------------------------------------------------------------------------------------
+    def send_image(self, url: str):
+        """
+        发送网络图片
+        """
+        self.xiaoding.send_image(pic_url=f"{url}")
+# ----------------------------------------------------------------------------------------------------
+# 钉钉推送日志信息
+info_webhook = SendMessage.info_webhook_1
+info_secret = SendMessage.info_secret
+info_monitor = SendMessage(info_webhook, info_secret)
+# ----------------------------------------------------------------------------------------------------
+# 钉钉推送错误信息
+error_webhook = SendMessage.error_webhook_1
+error_secret = SendMessage.error_secret
+error_monitor = SendMessage(error_webhook, error_secret)
