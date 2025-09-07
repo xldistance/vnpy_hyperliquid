@@ -1066,7 +1066,6 @@ class HyperliquidWebsocketApi(WebsocketClient):
         收到委托事件回报
         """
         data = packet["data"]
-        print(111,packet)
         for raw_data in data:
             raw =raw_data["order"]
             symbol=raw["coin"]
