@@ -761,4 +761,6 @@ class Info(API):
             return self.ws_manager.unsubscribe(subscription, subscription_id)
 
     def name_to_asset(self, name: str) -> int:
+        if name not in self.name_to_coin:
+            return {"error":f"{name}不在name_to_coin字典中"}
         return self.coin_to_asset[self.name_to_coin[name]]
