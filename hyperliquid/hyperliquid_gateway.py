@@ -795,7 +795,7 @@ class HyperliquidRestApi(RestClient):
             self.gateway.on_order(order)
             self.gateway.write_log(f"合约：{req.symbol}撤单失败，错误信息：{msg}")
     # ----------------------------------------------------------------------------------------------------
-    def query_history(self, req: HistoryRequest) -> List[BarData]:
+    def query_history(self, req: HistoryRequest):
         """
         查询历史数据
         """
@@ -990,6 +990,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
             tick = self.ticks[f"{symbol}_{exchange.value}"]
             tick.datetime = get_local_datetime(data["time"])
             tick.last_price = float(data["px"])
+            self.gateway.on_tick(tick)
     # ----------------------------------------------------------------------------------------------------
     def on_depth(self, packet: dict):
         """
