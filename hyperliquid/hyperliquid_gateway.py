@@ -89,7 +89,32 @@ TRADE_DIRECTION_HYPERLIQUID2VT= {
 STATUS_MAP = {
             "open":Status.NOTTRADED,
             "filled":Status.ALLTRADED,
-            "canceled":Status.CANCELLED
+            "rejected":Status.REJECTED,
+            "tickRejected":Status.REJECTED,
+            "perpMarginRejected":Status.REJECTED,
+            "minTradeNtlRejected":Status.REJECTED,
+            "marketOrderNoLiquidityRejected":Status.REJECTED,
+            "reduceOnlyRejected":Status.REJECTED,
+            "badAloPxRejected":Status.REJECTED,
+            "iocCancelRejected":Status.REJECTED,
+            "badTriggerPxRejected":Status.REJECTED,
+            "positionIncreaseAtOpenInterestCapRejected":Status.REJECTED,
+            "positionFlipAtOpenInterestCapRejected":Status.REJECTED,
+            "tooAggressiveAtOpenInterestCapRejected":Status.REJECTED,
+            "openInterestIncreaseRejected":Status.REJECTED,
+            "insufficientSpotBalanceRejected":Status.REJECTED,
+            "oracleRejected":Status.REJECTED,
+            "perpMaxPositionRejected":Status.REJECTED,
+            "canceled":Status.CANCELLED,
+            "openInterestCapCanceled":Status.CANCELLED,
+            "marginCanceled":Status.CANCELLED,
+            "vaultWithdrawalCanceled":Status.CANCELLED,
+            "liquidatedCanceled":Status.CANCELLED,
+            "reduceOnlyCanceled":Status.CANCELLED,
+            "siblingFilledCanceled":Status.CANCELLED,
+            "delistedCanceled":Status.CANCELLED,
+            "scheduledCancel":Status.CANCELLED,
+            "selfTradeCanceled":Status.CANCELLED,
         }
 # 多空反向映射
 OPPOSITE_DIRECTION = {
@@ -175,7 +200,7 @@ class HyperliquidGateway(BaseGateway):
                 expire_date = now_date + timedelta(days=180)
                 agent_result, agent_key = self.exchange_info.approve_agent(f"vnpy_{now_date.date()}")
                 if agent_result["status"] == "ok":
-                    save_json(f"hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_date":str(expire_date)})
+                    save_json("hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_date":str(expire_date)})
                 else:
                     self.write_log(f"创建代理失败，错误信息：{agent_result['response']}")
             else:
@@ -364,7 +389,7 @@ class HyperliquidRestApi(RestClient):
         查询活动委托单
         """
         account_address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
-        data = self.rest_info.open_orders(account_address)
+        data = self.rest_info.frontend_open_orders(account_address)
         self.on_query_order(data)
     # ----------------------------------------------------------------------------------------------------
     def query_contract(self) -> None:
@@ -834,7 +859,7 @@ class HyperliquidRestApi(RestClient):
             try:
                 database_manager.save_bar_data(history, False)
             except Exception as err:
-                self.gateway.write_log(f"{err}")
+                self.gateway.write_log(f"获取历史数据出错，错误信息：{err}")
                 return
 
             time_consuming_end = time()
