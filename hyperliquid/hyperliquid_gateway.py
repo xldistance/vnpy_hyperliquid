@@ -1122,7 +1122,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 gateway_name=self.gateway_name,
             )
             # 添加部分成交委托状态
-            if order.status != Status.CANCELLED and remain > 0 and trade_volume > 0:
+            if order.status not in [Status.CANCELLED,Status.REJECTED] and remain > 0 and trade_volume > 0:
                 self.gateway.write_log(f"部分成交交易所数据:{packet}")
                 order.status = Status.PARTTRADED
             if "reduceOnly" in raw and raw["reduceOnly"]:
