@@ -311,7 +311,7 @@ class WebsocketManager(threading.Thread):
 
     def on_open(self, _ws):
         """处理WebSocket连接打开"""
-        write_log(f"WEBSOCKET API SDK连接成功","HYPERLIQUID")
+        write_log(f"WEBSOCKET API SDK连接成功", "HYPERLIQUID")
 
         self.ws_ready = True
         self.is_connected = True
@@ -324,30 +324,23 @@ class WebsocketManager(threading.Thread):
         try:
             # 清空active_subscriptions，准备重新订阅
             self.active_subscriptions.clear()
-            
-            # 先取消订阅再订阅主题
+
+            # 重新订阅主题
             if self.all_subscriptions:
                 for subscription, active_subscription in self.all_subscriptions:
-                    identifier = subscription_to_identifier(subscription)
-                    self.active_subscriptions[identifier].append(active_subscription)
-                    self.ws.send(json.dumps({"method": "unsubscribe", "subscription": subscription}))
-                    self.ws.send(json.dumps({"method": "subscribe", "subscription": subscription}))
+                    # 调用subscribe函数
+                    self.subscribe(subscription, active_subscription.callback, active_subscription.subscription_id)
 
-            
             # 处理队列中的新订阅（如果有）
             if self.queued_subscriptions:
                 for subscription, active_subscription in self.queued_subscriptions:
-                    identifier = subscription_to_identifier(subscription)
-                    self.active_subscriptions[identifier].append(active_subscription)
-                    self.ws.send(json.dumps({"method": "subscribe", "subscription": subscription}))
-                    # 添加到所有订阅列表中
-                    self.all_subscriptions.append((subscription, active_subscription))
+                    # 调用subscribe函数
+                    self.subscribe(subscription, active_subscription.callback, active_subscription.subscription_id)
                 self.queued_subscriptions.clear()
-                        
+
         except Exception as ex:
             msg = f"WEBSOCKET API重新订阅时出错：{ex}"
-            write_log(msg,"HYPERLIQUID")
-
+            write_log(msg, "HYPERLIQUID")
     def subscribe(
         self, subscription: Subscription, callback: Callable[[Any], None], subscription_id: Optional[int] = None
     ) -> int:
