@@ -57,6 +57,7 @@ from vnpy.trader.utility import (
     remain_alpha,
     remain_digit,
     save_connection_status,
+    save_redis_data,
     load_json,
     save_json,
     error_monitor
@@ -480,12 +481,13 @@ class HyperliquidRestApi(RestClient):
         if not data or "balances" not in data:
             return
         data =data["balances"]
-        if len(data) == 1 and data[0]["coin"] == "USDC":
-            for symbol_exchange in self.gateway.ws_api.ticks:
-                symbol,exchange = symbol_exchange.split("_")
-                # 过滤期货合约
-                if exchange == "HYPE":
-                    continue
+        holding_coins = [item["coin"] for item in data]
+        for symbol_exchange in self.gateway.ws_api.ticks:
+            symbol,exchange = symbol_exchange.split("_")
+            # 过滤期货合约
+            if exchange == "HYPE":
+                continue
+            if symbol not in holding_coins:
                 long_position = PositionData(
                     symbol=symbol,
                     exchange=Exchange.HYPESPOT,
@@ -508,32 +510,31 @@ class HyperliquidRestApi(RestClient):
                 )
                 self.gateway.on_position(long_position)
                 self.gateway.on_position(short_position)
-        else:
-            for raw in data:
-                symbol = raw["coin"]
-                # 持仓过滤不可交易USDC
-                if symbol == "USDC":
-                    continue
-                long_position = PositionData(
-                    symbol = symbol,
-                    exchange= Exchange.HYPESPOT,
-                    gateway_name=self.gateway_name,
-                    volume=float(raw["total"]),
-                    direction=Direction.LONG,
-                    frozen=float(raw["hold"]),
-                )
-                short_position = PositionData(
-                    symbol=symbol,
-                    exchange=Exchange.HYPESPOT,
-                    direction=Direction.SHORT,
-                    volume=0,
-                    price=0,
-                    pnl=0,
-                    frozen=0,
-                    gateway_name=self.gateway_name,
-                )
-                self.gateway.on_position(long_position)
-                self.gateway.on_position(short_position)
+        for raw in data:
+            symbol = raw["coin"]
+            # 持仓过滤非现货USDC
+            if symbol == "USDC":
+                continue
+            long_position = PositionData(
+                symbol = symbol,
+                exchange= Exchange.HYPESPOT,
+                gateway_name=self.gateway_name,
+                volume=float(raw["total"]),
+                direction=Direction.LONG,
+                frozen=float(raw["hold"]),
+            )
+            short_position = PositionData(
+                symbol=symbol,
+                exchange=Exchange.HYPESPOT,
+                direction=Direction.SHORT,
+                volume=0,
+                price=0,
+                pnl=0,
+                frozen=0,
+                gateway_name=self.gateway_name,
+            )
+            self.gateway.on_position(long_position)
+            self.gateway.on_position(short_position)
 
         for raw in data:
             account: AccountData = AccountData(
@@ -614,12 +615,15 @@ class HyperliquidRestApi(RestClient):
         """
         持仓查询回报
         """
-        if not data:
-            for symbol_exchange in self.gateway.ws_api.ticks:
-                symbol,exchange = symbol_exchange.split("_")
-                # 过滤现货合约
-                if exchange == "HYPESPOT":
-                    continue
+        # 有持仓的合约symbol
+        holding_coins = [item["position"]["coin"] for item in data]
+
+        for symbol_exchange in self.gateway.ws_api.ticks:
+            symbol,exchange = symbol_exchange.split("_")
+            # 过滤现货合约
+            if exchange == "HYPESPOT":
+                continue
+            if symbol not in holding_coins:
                 long_position = PositionData(
                     symbol=symbol,
                     exchange=Exchange.HYPE,
@@ -642,7 +646,7 @@ class HyperliquidRestApi(RestClient):
                 )
                 self.gateway.on_position(long_position)
                 self.gateway.on_position(short_position)
-            return
+
         for raw in data:
             raw = raw["position"]
             volume = float(raw["szi"])
@@ -890,6 +894,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.ws_connected: bool = False
         self.ping_count = 0
         self.trade_ids = [] # trade_id过滤
+        self.max_volume_map:Dict[str,float] = {}  # symbol最大合约委托量映射
     # ----------------------------------------------------------------------------------------------------
     def connect(self, account_address: str, private_address: str, proxy_host: str, proxy_port: int) -> None:
         """
@@ -953,6 +958,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
         self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
         self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
+        self.ws_info.subscribe({ "type": "activeAssetData", "user": address, "coin": subscribe_symbol}, self.on_asset_data)
         self.ws_info.subscribe({"type": "userFills", "user": address}, self.on_trade)
         self.ws_info.subscribe({"type": "orderUpdates", "user": address}, self.on_order)
         if self.gateway.book_trade_status:
@@ -982,6 +988,16 @@ class HyperliquidWebsocketApi(WebsocketClient):
         tick.volume = float(data["ctx"]["dayBaseVlm"])  # 币计价成交量，dayNtlVlm 美元计价成交量
         if "openInterest" in data["ctx"]:
             tick.open_interest = float(data["ctx"]["openInterest"])
+    # ----------------------------------------------------------------------------------------------------
+    def on_asset_data(self,packet:dict):
+        """
+        收到合约资产数据回报，5秒推送一次
+        """
+        data = packet["data"]
+        symbol = data["coin"]
+        max_volume = float(data["maxTradeSzs"][0])
+        self.max_volume_map[symbol] = max_volume
+        save_redis_data("hyperliquid_max_volume",self.max_volume_map)
     # ----------------------------------------------------------------------------------------------------
     def on_bbo(self, packet: dict):
         """
@@ -1128,3 +1144,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
+            
