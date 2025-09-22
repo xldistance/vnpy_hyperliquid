@@ -182,7 +182,7 @@ class HyperliquidGateway(BaseGateway):
 
         private_address: str = log_account["private_address"]
         # 代理api过期时间
-        self.expire_date = datetime.strptime(log_account["expire_date"],"%Y-%m-%d")
+        self.expire_datetime = datetime.strptime(log_account["expire_datetime"],"%Y-%m-%d")
 
         proxy_host: str = ""
         proxy_port: str = ""
@@ -196,12 +196,13 @@ class HyperliquidGateway(BaseGateway):
         self.init_query()
 
         if self.generate_agent_api:
-            now_date = datetime.now()
+            now_datetime = datetime.now()
             if account_address == self.exchange_info.wallet.address:
-                expire_date = now_date + timedelta(days=180)
-                agent_result, agent_key = self.exchange_info.approve_agent(f"vnpy_{now_date.date()}")
+                expire_datetime = now_datetime + timedelta(days=180)
+                agent_result, agent_key = self.exchange_info.approve_agent(f"vnpy_{now_datetime.date()}")
                 if agent_result["status"] == "ok":
-                    save_json("hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_date":str(expire_date)})
+                    save_json("hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_datetime":str(expire_datetime)})
+                    self.write_log(f"创建代理成功，返回回报：{agent_result['response']}")
                 else:
                     self.write_log(f"创建代理失败，错误信息：{agent_result['response']}")
             else:
@@ -227,7 +228,7 @@ class HyperliquidGateway(BaseGateway):
     # ----------------------------------------------------------------------------------------------------
     def query_account(self) -> None:
         """
-        查询资金
+        查询永续账户资金
         """
         self.rest_api.query_account()
     # ----------------------------------------------------------------------------------------------------
@@ -293,7 +294,7 @@ class HyperliquidGateway(BaseGateway):
         self.count = 0
         self.rest_api.query_spot_account()
         # 代理api过期7天前发送提醒到钉钉
-        remain_datetime = self.expire_date - datetime.now()
+        remain_datetime = self.expire_datetime - datetime.now()
         if remain_datetime <= timedelta(days = 15):
             msg = f"交易接口：{self.gateway_name}，代理api有效时间剩余：{remain_datetime.days}天，请创建新的代理api"
             self.write_log(msg)
@@ -333,7 +334,7 @@ class HyperliquidRestApi(RestClient):
         # 生成委托单号加线程锁
         self.order_count: int = 0
         self.order_count_lock: Lock = Lock()
-        self.connect_time: int = 0
+        self.count_datetime: int = 0
         self.account_date = None  # 账户日期
         self.accounts_info: Dict[str, dict] = {}
         self.spot_inited = False # 现货信息查询状态
@@ -364,7 +365,6 @@ class HyperliquidRestApi(RestClient):
         """
         self.account_address = account_address
         self.private_address = private_address
-        self.connect_time = int(datetime.now().strftime("%Y%m%d%H%M%S"))
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.rest_info = Info(REST_HOST, skip_ws=True,timeout=60)
         self.start()
@@ -433,9 +433,11 @@ class HyperliquidRestApi(RestClient):
         # 等待合约价格精度推送完成
         while not PRICE_DECIMAL_MAP:
             sleep(1)
+        self.count_datetime = int(datetime.now().strftime("%Y%m%d%H%M%S"))
+
         # 生成本地委托号
         new_order_id = str(self._new_order_id()).rjust(18, '0')
-        orderid: str = "0x" + str(self.connect_time) + new_order_id
+        orderid: str = "0x" + str(self.count_datetime) + new_order_id
 
         # 推送提交中事件
         order: OrderData = req.create_order_data(orderid, self.gateway_name)
@@ -473,6 +475,37 @@ class HyperliquidRestApi(RestClient):
             # 系统委托单id撤单
             data = self.gateway.exchange_info.cancel(symbol,req.orderid)
         self.on_cancel_order(data,req)
+    # -------------------------------------------------------------------------------------------------------
+    def create_position_pair(self, symbol: str, exchange: Exchange, volume: float, avg_price: float, unrealized_pnl: float):
+        """
+        创建多空持仓数据对
+        """
+        direction = Direction.LONG if volume >= 0 else Direction.SHORT
+        
+        # 创建持仓对象
+        position_1 = PositionData(
+            symbol=symbol,
+            exchange=exchange,
+            direction=direction,
+            volume=abs(volume),
+            price=avg_price,
+            pnl=unrealized_pnl,
+            gateway_name=self.gateway_name,
+        )
+        
+        # 创建对立持仓对象
+        position_2 = PositionData(
+            symbol=symbol,
+            exchange=exchange,
+            direction=OPPOSITE_DIRECTION[direction],
+            volume=0,
+            price=0,
+            pnl=0,
+            gateway_name=self.gateway_name,
+        )
+        
+        self.gateway.on_position(position_1)
+        self.gateway.on_position(position_2)
     # ----------------------------------------------------------------------------------------------------
     def on_query_spot_account(self,data:dict):
         """
@@ -481,6 +514,7 @@ class HyperliquidRestApi(RestClient):
         if not data or "balances" not in data:
             return
         data =data["balances"]
+        # 不在持仓推送列表中的symbol持仓赋值为0
         holding_coins = [item["coin"] for item in data]
         for symbol_exchange in self.gateway.ws_api.ticks:
             symbol,exchange = symbol_exchange.split("_")
@@ -488,28 +522,13 @@ class HyperliquidRestApi(RestClient):
             if exchange == "HYPE":
                 continue
             if symbol not in holding_coins:
-                long_position = PositionData(
-                    symbol=symbol,
-                    exchange=Exchange.HYPESPOT,
-                    direction=Direction.LONG,
-                    volume=0,
-                    price=0,
-                    pnl=0,
-                    frozen=0,
-                    gateway_name=self.gateway_name,
+                self.create_position_pair(
+                    symbol = symbol,
+                    exchange = Exchange.HYPESPOT,
+                    volume = 0,
+                    avg_price = 0,
+                    unrealized_pnl = 0,
                 )
-                short_position = PositionData(
-                    symbol=symbol,
-                    exchange=Exchange.HYPESPOT,
-                    direction=Direction.SHORT,
-                    volume=0,
-                    price=0,
-                    pnl=0,
-                    frozen=0,
-                    gateway_name=self.gateway_name,
-                )
-                self.gateway.on_position(long_position)
-                self.gateway.on_position(short_position)
         for raw in data:
             symbol = raw["coin"]
             # 持仓过滤非现货USDC
@@ -617,63 +636,30 @@ class HyperliquidRestApi(RestClient):
         """
         # 有持仓的合约symbol
         holding_coins = [item["position"]["coin"] for item in data]
-
+        # 不在持仓推送列表中的symbol持仓赋值为0
         for symbol_exchange in self.gateway.ws_api.ticks:
             symbol,exchange = symbol_exchange.split("_")
             # 过滤现货合约
             if exchange == "HYPESPOT":
                 continue
             if symbol not in holding_coins:
-                long_position = PositionData(
+                self.create_position_pair(
                     symbol=symbol,
                     exchange=Exchange.HYPE,
-                    direction=Direction.LONG,
                     volume=0,
-                    price=0,
-                    pnl=0,
-                    frozen=0,
-                    gateway_name=self.gateway_name,
+                    avg_price=0,
+                    unrealized_pnl=0
                 )
-                short_position = PositionData(
-                    symbol=symbol,
-                    exchange=Exchange.HYPE,
-                    direction=Direction.SHORT,
-                    volume=0,
-                    price=0,
-                    pnl=0,
-                    frozen=0,
-                    gateway_name=self.gateway_name,
-                )
-                self.gateway.on_position(long_position)
-                self.gateway.on_position(short_position)
 
         for raw in data:
             raw = raw["position"]
-            volume = float(raw["szi"])
-            if volume >= 0:
-                direction = Direction.LONG
-            elif volume < 0:
-                direction = Direction.SHORT
-            position_1: PositionData = PositionData(
+            self.create_position_pair(
                 symbol=raw["coin"],
                 exchange=Exchange.HYPE,
-                direction=direction,
-                volume=abs(volume),
-                price=float(raw["entryPx"]),
-                pnl=float(raw["unrealizedPnl"]),
-                gateway_name=self.gateway_name,
+                volume=float(raw["szi"]),
+                avg_price=float(raw["entryPx"]),
+                unrealized_pnl=float(raw["unrealizedPnl"])
             )
-            position_2 = PositionData(
-                symbol=raw["coin"],
-                exchange=Exchange.HYPE,
-                gateway_name=self.gateway_name,
-                direction=OPPOSITE_DIRECTION[position_1.direction],
-                volume=0,
-                price=0,
-                pnl=0,
-            )
-            self.gateway.on_position(position_1)
-            self.gateway.on_position(position_2)
     # ----------------------------------------------------------------------------------------------------
     def query_position(self):
         pass
@@ -698,7 +684,7 @@ class HyperliquidRestApi(RestClient):
             trade_volume = volume - untrade_volume
             if volume == untrade_volume:
                 status = Status.NOTTRADED
-            elif volume > untrade_volume:
+            elif 0 < untrade_volume < volume:
                 status = Status.PARTTRADED
             if "cloid" not in raw:
                 orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
@@ -995,7 +981,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         data = packet["data"]
         symbol = data["coin"]
-        max_volume = float(data["maxTradeSzs"][0])
+        max_volume = float(data["maxTradeSzs"][0])      # 最大开仓委托量
         self.max_volume_map[symbol] = max_volume
         save_redis_data("hyperliquid_max_volume",self.max_volume_map)
     # ----------------------------------------------------------------------------------------------------
@@ -1117,8 +1103,8 @@ class HyperliquidWebsocketApi(WebsocketClient):
             else:
                 exchange = Exchange.HYPE
             volume = float(raw["origSz"])
-            remain = float(raw["sz"])
-            trade_volume = volume -remain
+            untrade_volume = float(raw["sz"])
+            trade_volume = volume -untrade_volume
             if "cloid" not in raw:
                 orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             else:
@@ -1138,7 +1124,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 gateway_name=self.gateway_name,
             )
             # 添加部分成交委托状态
-            if order.status not in [Status.CANCELLED,Status.REJECTED] and remain > 0 and trade_volume > 0:
+            if (order.status not in [Status.CANCELLED,Status.REJECTED] and 0 < order.traded < order.volume):
                 self.gateway.write_log(f"部分成交交易所数据:{packet}")
                 order.status = Status.PARTTRADED
             if "reduceOnly" in raw and raw["reduceOnly"]:
