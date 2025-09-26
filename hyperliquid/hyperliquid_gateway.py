@@ -164,6 +164,7 @@ class HyperliquidGateway(BaseGateway):
         # 订阅逐笔成交数据状态
         self.book_trade_status: bool = False
         self.count:int = 0
+        self.query_count:int = 0
         # 系统委托单id和自定义委托单id映射字典
         self.system_local_orderid_map = {}
         # 是否使用代理api，默认使用代理api交易，避免泄露私钥，安全性更高
@@ -283,13 +284,10 @@ class HyperliquidGateway(BaseGateway):
         # 删除过期trade_ids
         if len(self.ws_api.trade_ids) > 200:
             self.ws_api.trade_ids.pop(0)
-        # 循环执行查询函数
-        function = self.query_functions.pop(0)
-        function()
-        self.query_functions.append(function)
-        # 3秒查询一次现货账户资金
+
+        # 5秒查询一次现货账户资金
         self.count += 1
-        if self.count < 3:
+        if self.count < 5:
             return
         self.count = 0
         self.rest_api.query_spot_account()
@@ -300,9 +298,22 @@ class HyperliquidGateway(BaseGateway):
             self.write_log(msg)
             error_monitor.send_text(msg)
     # ----------------------------------------------------------------------------------------------------
+    def process_query_order(self,event) -> None:
+        """
+        定时循环执行查询函数
+        """
+        self.query_count += 1
+        if self.query_count < 3:
+            return
+        self.query_count = 0
+        function = self.query_functions.pop(0)
+        function()
+        self.query_functions.append(function)
+    # ----------------------------------------------------------------------------------------------------
     def init_query(self):
         """ """
         self.event_engine.register(EVENT_TIMER, self.process_timer_event)
+        self.event_engine.register(EVENT_TIMER, self.process_query_order)
         if self.history_status:
             self.event_engine.register(EVENT_TIMER, self.query_history)
     # ----------------------------------------------------------------------------------------------------
