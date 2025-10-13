@@ -34,8 +34,11 @@ class API:
                 # 收到null错误返回空字典
                 if text == "null":
                     return {}
-                msg = f"REST API请求失败，请求地址：{url}，错误代码：{status_code}，错误信息：{text}"
+                # 502错误，重启交易子进程
+                msg = f"REST API请求失败，请求地址：{response.url}，错误代码：{status_code}，错误信息：{text}"
                 write_log(msg,"HYPERLIQUID")
+                if status_code == 502:
+                    save_connection_status("HYPERLIQUID",False,msg)
                 return {"error":text}
         except ConnectionError as ex:
             msg = f"REST API连接断开，请求地址：{url}，错误信息：{ex}"
