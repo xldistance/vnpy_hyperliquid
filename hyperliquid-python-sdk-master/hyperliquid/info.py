@@ -72,6 +72,8 @@ class Info(API):
                 self.set_perp_meta(fresh_meta, offset)
 
     def set_perp_meta(self, meta: Meta, offset: int) -> Any:
+        if "universe" not in meta:
+            return
         for asset, asset_info in enumerate(meta["universe"]):
             asset += offset
             self.coin_to_asset[asset_info["name"]] = asset
@@ -471,8 +473,9 @@ class Info(API):
                 time: int
             }
         """
-        return self.post("/info", {"type": "l2Book", "coin": self.name_to_coin[name]})
-
+        if name in self.name_to_coin:
+            return self.post("/info", {"type": "l2Book", "coin": self.name_to_coin[name]})
+        return {}
     def candles_snapshot(self, name: str, interval: str, startTime: int, endTime: int) -> Any:
         """获取指定币种的K线快照
 
@@ -501,9 +504,10 @@ class Info(API):
                 ...
             ]
         """
-        req = {"coin": self.name_to_coin[name], "interval": interval, "startTime": startTime, "endTime": endTime}
-        return self.post("/info", {"type": "candleSnapshot", "req": req})
-
+        if name in self.name_to_coin:
+            req = {"coin": self.name_to_coin[name], "interval": interval, "startTime": startTime, "endTime": endTime}
+            return self.post("/info", {"type": "candleSnapshot", "req": req})
+        return []
     def user_fees(self, address: str) -> Any:
         """获取与用户相关的交易量活动。
         POST /info
