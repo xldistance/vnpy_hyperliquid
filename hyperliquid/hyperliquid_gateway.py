@@ -697,11 +697,11 @@ class HyperliquidRestApi(RestClient):
                 status = Status.NOTTRADED
             elif 0 < untrade_volume < volume:
                 status = Status.PARTTRADED
-            if "cloid" not in raw:
-                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
-            else:
+            if "cloid" in raw:
                 orderid = raw["cloid"]
                 self.gateway.system_local_orderid_map[raw["oid"]] = orderid
+            else:
+                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             order: OrderData = OrderData(
                 orderid=orderid,
                 symbol=symbol,
@@ -1073,7 +1073,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 orderid = raw["cloid"]
                 self.gateway.system_local_orderid_map[raw["oid"]] = orderid
             else:
-                orderid = raw["oid"]
+                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             symbol = raw["coin"]
             if (symbol.startswith("@") or symbol.endswith("/USDC")):
                 symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
@@ -1116,12 +1116,11 @@ class HyperliquidWebsocketApi(WebsocketClient):
             volume = float(raw["origSz"])
             untrade_volume = float(raw["sz"])
             trade_volume = volume -untrade_volume
-            if "cloid" not in raw:
-                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
-            else:
+            if "cloid" in raw:
                 orderid = raw["cloid"]
                 self.gateway.system_local_orderid_map[raw["oid"]] = orderid
-
+            else:
+                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             order: OrderData = OrderData(
                 orderid=orderid,
                 symbol=symbol,
