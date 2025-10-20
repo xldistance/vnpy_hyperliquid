@@ -285,12 +285,12 @@ class HyperliquidGateway(BaseGateway):
         if len(self.ws_api.trade_ids) > 200:
             self.ws_api.trade_ids.pop(0)
 
-        # 5秒查询一次现货账户资金
+        # 10秒查询一次现货账户资金
         self.count += 1
-        if self.count < 5:
+        if self.count < 10:
             return
         self.count = 0
-        self.rest_api.query_spot_account()
+        #self.rest_api.query_spot_account()
         # 代理api过期7天前发送提醒到钉钉
         remain_datetime = self.expire_datetime - datetime.now()
         if remain_datetime <= timedelta(days = 15):
@@ -303,7 +303,7 @@ class HyperliquidGateway(BaseGateway):
         定时循环执行查询函数
         """
         self.query_count += 1
-        if self.query_count < 3:
+        if self.query_count < 10:
             return
         self.query_count = 0
         function = self.query_functions.pop(0)
