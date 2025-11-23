@@ -23,7 +23,7 @@ import pyjson5 as jsonc
 import json5 as json
 from filelock import FileLock
 # 需要在write_log同文件中的某个函数传入交易子进程的EVENT_ENGINE并赋值全局变量，觉得太麻烦可以改成print或者logger
-EVENT_ENGINE = EventEngine()
+EVENT_ENGINE = EventEngine(interval = int(1e9))
 EVENT_ENGINE.start()
 def write_log(msg: str, gateway_name: str = ""):
     """
