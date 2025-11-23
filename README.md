@@ -49,17 +49,7 @@ def save_connection_status(gateway_name: str, status: bool, msg: str = ""):
     connection_status = load_json("connection_status.json")
     connection_status.update({gateway_name: status})
     save_json("connection_status.json", connection_status)
-def load_json(filename: str) -> Dict:
-    """
-    读取json文件
-    """
-    filepath = get_file_path(filename)
-    if not filepath.exists():
-        save_json(filename, {})
-        return {}
 
-    lock_file = filepath.with_suffix(filepath.suffix + ".lock")
-    with FileLock(lock_file):
 from dingtalkchatbot.chatbot import DingtalkChatbot
 from datetime import datetime
 class SendMessage:
