@@ -133,6 +133,7 @@ PRICE_DECIMAL_MAP = {}
 # ----------------------------------------------------------------------------------------------------
 class HyperliquidGateway(BaseGateway):
     """
+    需要先安装本地修改的hyperliquid-python-sdk
     vn.py用于对接HYPERLIQUID的交易接口
     仅适用于单向持仓
     """
@@ -186,7 +187,7 @@ class HyperliquidGateway(BaseGateway):
         self.expire_datetime = datetime.strptime(log_account["expire_datetime"],"%Y-%m-%d")
 
         proxy_host: str = ""
-        proxy_port: str = ""
+        proxy_port: int = 0
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(private_address)
         account_address = account_address if self.use_api_agent else account.address
@@ -285,9 +286,9 @@ class HyperliquidGateway(BaseGateway):
         if len(self.ws_api.trade_ids) > 200:
             self.ws_api.trade_ids.pop(0)
 
-        # 10秒查询一次现货账户资金
+        # 5秒查询一次现货账户资金
         self.count += 1
-        if self.count < 10:
+        if self.count < 5:
             return
         self.count = 0
         #self.rest_api.query_spot_account()
@@ -303,7 +304,7 @@ class HyperliquidGateway(BaseGateway):
         定时循环执行查询函数
         """
         self.query_count += 1
-        if self.query_count < 10:
+        if self.query_count < 6:
             return
         self.query_count = 0
         function = self.query_functions.pop(0)
@@ -455,7 +456,7 @@ class HyperliquidRestApi(RestClient):
         self.gateway.on_order(order)
         is_buy = True if order.direction == Direction.LONG else False
         # 现货不支持reduce_only
-        reduce_only = req.offset == Offset.CLOSE and req.exchange == Exchange.HYPE
+        reduce_only = (req.offset == Offset.CLOSE and req.exchange == Exchange.HYPE)
         if req.price > 100000:
             price = round(req.price)
         else:
@@ -697,7 +698,7 @@ class HyperliquidRestApi(RestClient):
                 status = Status.NOTTRADED
             elif 0 < untrade_volume < volume:
                 status = Status.PARTTRADED
-            if "cloid" in raw:
+            if raw.get("cloid"):
                 orderid = raw["cloid"]
                 self.gateway.system_local_orderid_map[raw["oid"]] = orderid
             else:
@@ -1116,7 +1117,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
             volume = float(raw["origSz"])
             untrade_volume = float(raw["sz"])
             trade_volume = volume -untrade_volume
-            if "cloid" in raw:
+            if raw.get("cloid"):
                 orderid = raw["cloid"]
                 self.gateway.system_local_orderid_map[raw["oid"]] = orderid
             else:
@@ -1133,9 +1134,8 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 datetime=get_local_datetime(raw["timestamp"]),
                 gateway_name=self.gateway_name,
             )
-            # 添加部分成交委托状态
+            # 添加部分成交委托状态，hyperliquid部分成交status为filled
             if (order.status not in [Status.CANCELLED,Status.REJECTED] and 0 < order.traded < order.volume):
-                self.gateway.write_log(f"部分成交交易所数据:{packet}")
                 order.status = Status.PARTTRADED
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
