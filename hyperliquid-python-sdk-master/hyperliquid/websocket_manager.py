@@ -232,13 +232,13 @@ class WebsocketManager(threading.Thread):
             
             # 更详细的错误信息
             if isinstance(error, websocket.WebSocketConnectionClosedException):
-                msg = f"WEBSOCKET API连接被关闭，准备重连..."
+                msg = "WEBSOCKET API连接被关闭，准备重连..."
             elif isinstance(error, websocket.WebSocketBadStatusException):
-                msg = f"WEBSOCKET API收到错误状态码，准备重连..."
+                msg = "WEBSOCKET API收到错误状态码，准备重连..."
             elif isinstance(error, websocket.WebSocketTimeoutException):
-                msg = f"WEBSOCKET API连接超时，准备重连..."
+                msg = "WEBSOCKET API连接超时，准备重连..."
             elif isinstance(error, (ConnectionResetError, ConnectionAbortedError)):
-                msg = f"WEBSOCKET API连接被远程主机重置，准备重连..."
+                msg = "WEBSOCKET API连接被远程主机重置，准备重连..."
             else:
                 msg = f"WEBSOCKET API网络错误: {error}，准备重连..."
             
@@ -254,7 +254,7 @@ class WebsocketManager(threading.Thread):
         # DNS解析失败
         elif isinstance(error, socket.gaierror) or (hasattr(error, 'errno') and error.errno == 11001):
             self.need_reconnect = True
-            msg = f"WEBSOCKET API DNS解析失败，将重试连接..."
+            msg = "WEBSOCKET API DNS解析失败，将重试连接..."
             write_log(msg,"HYPERLIQUID")
             if self.ws and self.ws.keep_running:
                 try:
@@ -284,9 +284,11 @@ class WebsocketManager(threading.Thread):
         if close_status_code not in normal_close_codes and not self.stop_event.is_set():
             self.need_reconnect = True
             msg = f"WEBSOCKET API连接异常关闭 {close_info}，准备重连...".strip()
-        else:
+        elif not self.stop_event.is_set():  # 正常关闭但不是主动停止
+            self.need_reconnect = True
+            msg = f"WEBSOCKET API连接已关闭 {close_info}，准备重连...".strip()
+        else:  # 主动停止
             msg = f"WEBSOCKET API连接已关闭 {close_info}".strip()
-        
         write_log(msg,"HYPERLIQUID")
         
         if not self.need_reconnect:
@@ -311,7 +313,7 @@ class WebsocketManager(threading.Thread):
 
     def on_open(self, _ws):
         """处理WebSocket连接打开"""
-        write_log(f"WEBSOCKET API SDK连接成功", "HYPERLIQUID")
+        write_log("WEBSOCKET API SDK连接成功","HYPERLIQUID")
 
         self.ws_ready = True
         self.is_connected = True
@@ -324,23 +326,31 @@ class WebsocketManager(threading.Thread):
         try:
             # 清空active_subscriptions，准备重新订阅
             self.active_subscriptions.clear()
-
-            # 重新订阅主题
+            
+            # 先取消订阅再订阅主题
             if self.all_subscriptions:
                 for subscription, active_subscription in self.all_subscriptions:
-                    # 调用subscribe函数
-                    self.subscribe(subscription, active_subscription.callback, active_subscription.subscription_id)
+                    identifier = subscription_to_identifier(subscription)
+                    self.active_subscriptions[identifier].append(active_subscription)
+                    self.ws.send(json.dumps({"method": "unsubscribe", "subscription": subscription}))
+                    time.sleep(0.1)
+                    self.ws.send(json.dumps({"method": "subscribe", "subscription": subscription}))
 
+            
             # 处理队列中的新订阅（如果有）
             if self.queued_subscriptions:
                 for subscription, active_subscription in self.queued_subscriptions:
-                    # 调用subscribe函数
-                    self.subscribe(subscription, active_subscription.callback, active_subscription.subscription_id)
+                    identifier = subscription_to_identifier(subscription)
+                    self.active_subscriptions[identifier].append(active_subscription)
+                    self.ws.send(json.dumps({"method": "subscribe", "subscription": subscription}))
+                    # 添加到所有订阅列表中
+                    self.all_subscriptions.append((subscription, active_subscription))
                 self.queued_subscriptions.clear()
-
+                        
         except Exception as ex:
             msg = f"WEBSOCKET API重新订阅时出错：{ex}"
-            write_log(msg, "HYPERLIQUID")
+            write_log(msg,"HYPERLIQUID")
+
     def subscribe(
         self, subscription: Subscription, callback: Callable[[Any], None], subscription_id: Optional[int] = None
     ) -> int:
