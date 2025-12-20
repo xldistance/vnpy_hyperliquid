@@ -16,6 +16,8 @@ class API:
         self.session.headers.update({"Content-Type": "application/json"})
         self._logger = logging.getLogger(__name__)
         self.timeout = timeout
+        # 需要重启交易子进程的错误代码
+        self.restart_error_code = [502,504]
 
     def post(self, url_path: str, payload: Any = None) -> Any:
         payload = payload or {}
@@ -34,10 +36,10 @@ class API:
                 # 收到null错误返回空字典
                 if text == "null":
                     return {}
-                # 502错误，重启交易子进程
+                # 502，504错误，重启交易子进程
                 msg = f"REST API请求失败，请求地址：{response.url}，错误代码：{status_code}，错误信息：{text}"
                 write_log(msg,"HYPERLIQUID")
-                if status_code == 502:
+                if status_code in self.restart_error_code:
                     save_connection_status("HYPERLIQUID",False,msg)
                 return {"error":text}
         except ConnectionError as ex:
