@@ -53,7 +53,6 @@ from vnpy.trader.utility import (
     get_local_datetime,
     get_uuid,
     is_target_contract,
-    load_json,
     remain_alpha,
     remain_digit,
     save_connection_status,
@@ -1151,3 +1150,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
             
+
