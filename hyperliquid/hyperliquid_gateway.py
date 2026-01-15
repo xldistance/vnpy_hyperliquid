@@ -201,9 +201,10 @@ class HyperliquidGateway(BaseGateway):
             now_datetime = datetime.now()
             if account_address == self.exchange_info.wallet.address:
                 expire_datetime = now_datetime + timedelta(days=180)
+                self.exchange_info.set_expires_after(int(expire_datetime.timestamp() * 1000))
                 agent_result, agent_key = self.exchange_info.approve_agent(f"vnpy_{now_datetime.date()}")
                 if agent_result["status"] == "ok":
-                    save_json("hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_datetime":str(expire_datetime)})
+                    save_json("hyperliquid_agent_api.json",{"agent_secret_key":agent_key,"expire_datetime":str(expire_datetime.date())})
                     self.write_log(f"创建代理成功，返回回报：{agent_result['response']}")
                 else:
                     self.write_log(f"创建代理失败，错误信息：{agent_result['response']}")
@@ -1141,3 +1142,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
             
+
