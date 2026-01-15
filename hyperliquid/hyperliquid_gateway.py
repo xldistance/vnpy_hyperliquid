@@ -63,8 +63,6 @@ from vnpy.trader.utility import (
     error_monitor
 )
 
-recording_list = GetFilePath.recording_list
-
 # REST API地址
 REST_HOST: str = "https://api.hyperliquid.xyz"
 
@@ -146,6 +144,7 @@ class HyperliquidGateway(BaseGateway):
     }
 
     exchanges: List[Exchange] = [Exchange.HYPE,Exchange.HYPESPOT]
+    get_file_path = GetFilePath()
     # ----------------------------------------------------------------------------------------------------
     def __init__(self, event_engine: EventEngine, gateway_name: str = "HYPERLIQUID") -> None:
         """
@@ -156,7 +155,9 @@ class HyperliquidGateway(BaseGateway):
         self.ws_api: "HyperliquidWebsocketApi" = HyperliquidWebsocketApi(self)
         self.rest_api: "HyperliquidRestApi" = HyperliquidRestApi(self)
         self.orders: Dict[str, OrderData] = {}
-        self.recording_list = [vt_symbol for vt_symbol in recording_list if is_target_contract(vt_symbol, self.gateway_name)]
+        # 所有合约列表
+        self.recording_list = self.get_file_path.recording_list
+        self.recording_list = [vt_symbol for vt_symbol in self.recording_list if is_target_contract(vt_symbol, self.gateway_name)]
         # 查询历史数据合约列表
         self.history_contracts = copy(self.recording_list)
         self.query_functions = [self.query_order]
@@ -293,7 +294,7 @@ class HyperliquidGateway(BaseGateway):
             return
         self.count = 0
         #self.rest_api.query_spot_account()
-        # 代理api过期7天前发送提醒到钉钉
+        # 代理api过期15天前发送提醒到钉钉
         remain_datetime = self.expire_datetime - datetime.now()
         if remain_datetime <= timedelta(days = 15):
             msg = f"交易接口：{self.gateway_name}，代理api有效时间剩余：{remain_datetime.days}天，请创建新的代理api"
@@ -587,7 +588,7 @@ class HyperliquidRestApi(RestClient):
             return
         accounts_info = list(self.accounts_info.values())
         account_date = accounts_info[-1]["datetime"].date()
-        account_path = str(GetFilePath.ctp_account_path).replace("ctp_account_main", self.gateway.account_file_name)
+        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
         write_header = not Path(account_path).exists()
         additional_writing = self.account_date and self.account_date != account_date
         self.account_date = account_date
@@ -628,7 +629,7 @@ class HyperliquidRestApi(RestClient):
             return
         accounts_info = list(self.accounts_info.values())
         account_date = accounts_info[-1]["datetime"].date()
-        account_path = str(GetFilePath.ctp_account_path).replace("ctp_account_main", self.gateway.account_file_name)
+        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
         write_header = not Path(account_path).exists()
         additional_writing = self.account_date and self.account_date != account_date
         self.account_date = account_date
@@ -677,6 +678,12 @@ class HyperliquidRestApi(RestClient):
     def query_position(self):
         pass
     # ----------------------------------------------------------------------------------------------------
+    def is_spot_symbol(self,symbol:str):
+        """
+        判定是否是现货合约
+        """
+        return (symbol.startswith("@") or symbol.endswith("/USDC"))
+    # ----------------------------------------------------------------------------------------------------
     def on_query_order(self, data: dict) -> None:
         """
         委托查询回报
@@ -687,7 +694,7 @@ class HyperliquidRestApi(RestClient):
             if not isinstance(raw,dict):
                 return
             symbol = raw["coin"]
-            if (symbol.startswith("@") or symbol.endswith("/USDC")):
+            if self.is_spot_symbol(symbol):
                 symbol = self.spot_name_symbol_map[symbol]
                 exchange = Exchange.HYPESPOT
             else:
@@ -794,7 +801,7 @@ class HyperliquidRestApi(RestClient):
         委托下单回报
         """
         if "error" in data:
-            msg = data["response"]
+            msg = data["response"] if "response" in data else data
             self.gateway.write_log(f"合约：{order.vt_symbol}发送委托单失败，错误信息：{msg}")
             order.status = Status.REJECTED
             self.gateway.on_order(order)
@@ -904,6 +911,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.ws_info = Info(REST_HOST, skip_ws=False)
         self.init(WEBSOCKET_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.start()
+        self.is_spot_symbol = self.gateway.rest_api.is_spot_symbol
         self.gateway.event_engine.register(EVENT_TIMER, self.send_ping)
     # ----------------------------------------------------------------------------------------------------
     def send_ping(self, event):
@@ -976,7 +984,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         data = packet["data"]
         symbol = data["coin"]
 
-        if (symbol.startswith("@") or symbol.endswith("/USDC")):
+        if self.is_spot_symbol(symbol):
             symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
             exchange = Exchange.HYPESPOT
         else:
@@ -985,6 +993,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         if not tick:
             return
         tick.volume = float(data["ctx"]["dayBaseVlm"])  # 币计价成交量，dayNtlVlm 美元计价成交量
+        tick.pre_close = float(data["ctx"]["prevDayPx"])    # 前一日收盘价格
         if "openInterest" in data["ctx"]:
             tick.open_interest = float(data["ctx"]["openInterest"])
     # ----------------------------------------------------------------------------------------------------
@@ -1005,7 +1014,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         data = packet["data"]
         bbo = data["bbo"]
         symbol = data["coin"]
-        if (symbol.startswith("@") or symbol.endswith("/USDC")):
+        if self.is_spot_symbol(symbol):
             symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
             exchange = Exchange.HYPESPOT
         else:
@@ -1022,7 +1031,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         data = packet["data"]
         for data in packet["data"]:
             symbol = data["coin"]
-            if (symbol.startswith("@") or symbol.endswith("/USDC")):
+            if self.is_spot_symbol(symbol):
                 symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
                 exchange = Exchange.HYPESPOT
             else:
@@ -1038,7 +1047,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         data = packet["data"]
         symbol:str = data["coin"]
-        if (symbol.startswith("@") or symbol.endswith("/USDC")):
+        if self.is_spot_symbol(symbol):
             symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
             exchange = Exchange.HYPESPOT
         else:
@@ -1077,7 +1086,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
             else:
                 orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
             symbol = raw["coin"]
-            if (symbol.startswith("@") or symbol.endswith("/USDC")):
+            if self.is_spot_symbol(symbol):
                 symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
                 exchange = Exchange.HYPESPOT
             else:
@@ -1110,7 +1119,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         for raw_data in data:
             raw =raw_data["order"]
             symbol=raw["coin"]
-            if (symbol.startswith("@") or symbol.endswith("/USDC")):
+            if self.is_spot_symbol(symbol):
                 symbol = self.gateway.rest_api.spot_name_symbol_map[symbol]
                 exchange = Exchange.HYPESPOT
             else:
@@ -1142,4 +1151,3 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
             
-
