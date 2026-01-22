@@ -14,7 +14,7 @@ pip install .
 > **注意**:默认使用代理api交易，去官方网页/更多/api里面创建代理api，不建议使用私钥交易避免私钥泄露。要使用私钥交易，赋值self.use_api_agent为False。
 > account_address是钱包的公开地址，private_address是代理api的私钥地址或者钱包的私钥地址。
 > 
-> **注意**:订阅品种示例:现货(UBTC),永续(BTC),股票永续(xyz:NVDA),其他合约格式可以去vnpy的gui 帮助/查询合约里面查看
+> **注意**:订阅品种示例:现货(UBTC),永续(BTC),股票永续(xyz:NVDA,xyz:JPY,km:US500),其他合约格式可以去vnpy的gui 帮助/查询合约里面查看
 ### 🚫 架构说明
 
 > **注意**: VNPY 原生的 REST API 和 WebSocket API 在此集成中**仅作为接口框架存在**，实际的数据交互完全通过 Hyperliquid 官方 SDK 实现。
