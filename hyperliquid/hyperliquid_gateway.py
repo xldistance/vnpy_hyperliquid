@@ -143,6 +143,8 @@ class HyperliquidGateway(BaseGateway):
     }
 
     exchanges: List[Exchange] = [Exchange.HYPE,Exchange.HYPESPOT]
+    # perp_dexs：""为原始交易所，xyz为股票代币交易所
+    perp_dexs = ["","xyz"]
     get_file_path = GetFilePath()
     # ----------------------------------------------------------------------------------------------------
     def __init__(self, event_engine: EventEngine, gateway_name: str = "HYPERLIQUID") -> None:
@@ -191,8 +193,7 @@ class HyperliquidGateway(BaseGateway):
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(private_address)
         account_address = account_address if self.use_api_agent else account.address
-        # perp_dexs：""为原始交易所，xyz为股票代币交易所
-        self.exchange_info = HyperliquidExchange(account, REST_HOST, perp_dexs=["","xyz"], account_address=account_address, timeout=60)
+        self.exchange_info = HyperliquidExchange(account, REST_HOST, perp_dexs=self.perp_dexs, account_address=account_address, timeout=60)
         self.rest_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.ws_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.init_query()
@@ -379,7 +380,7 @@ class HyperliquidRestApi(RestClient):
         self.account_address = account_address
         self.private_address = private_address
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
-        self.rest_info = Info(REST_HOST,perp_dexs=["","xyz"], skip_ws=True, timeout=60)
+        self.rest_info = Info(REST_HOST,perp_dexs=self.gateway.perp_dexs, skip_ws=True, timeout=60)
         self.start()
         self.gateway.write_log(f"交易接口：{self.gateway_name}，REST API启动成功")
         self.query_contract()
@@ -411,8 +412,7 @@ class HyperliquidRestApi(RestClient):
         查询合约信息
         """
         # 查询加密货币和股票代币合约信息
-        dexs = ["","xyz"]
-        for dex in dexs:
+        for dex in self.gateway.perp_dexs:
             perp_data = self.rest_info.meta(dex)
             self.on_query_perp_contract(perp_data,dex)
         spot_data = self.rest_info.spot_meta()
@@ -795,10 +795,10 @@ class HyperliquidRestApi(RestClient):
             )
             PRICE_DECIMAL_MAP[f"{contract.symbol}_{contract.exchange.value}"] = price_decimal
             self.gateway.on_contract(contract)
-        if dex== "xyz":
-            msg = "股票合约"
+        if not dex:
+            msg = "加密货币"
         else:
-            msg = "合约"
+            msg = dex
         self.gateway.write_log(f"交易接口：{self.gateway_name}，{msg}信息查询成功")
     # ----------------------------------------------------------------------------------------------------
     def on_send_order(self, data: dict,order:OrderData) -> None:
@@ -913,7 +913,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         self.account_address = account_address
         self.private_address = private_address
-        self.ws_info = Info(REST_HOST,perp_dexs=["","xyz"], skip_ws=False)
+        self.ws_info = Info(REST_HOST,perp_dexs=self.gateway.perp_dexs, skip_ws=False)
         self.init(WEBSOCKET_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.start()
         self.is_spot_symbol = self.gateway.rest_api.is_spot_symbol
