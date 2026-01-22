@@ -53,11 +53,11 @@ from vnpy.trader.utility import (
     get_local_datetime,
     get_uuid,
     is_target_contract,
+    load_json,
     remain_alpha,
     remain_digit,
     save_connection_status,
     save_redis_data,
-    load_json,
     save_json,
     error_monitor
 )
@@ -191,8 +191,8 @@ class HyperliquidGateway(BaseGateway):
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(private_address)
         account_address = account_address if self.use_api_agent else account.address
-        self.exchange_info = HyperliquidExchange(account, REST_HOST, account_address=account_address, perp_dexs=None,timeout=60)
-        
+        # perp_dexs：""为原始交易所，xyz为股票代币交易所
+        self.exchange_info = HyperliquidExchange(account, REST_HOST, perp_dexs=["","xyz"], account_address=account_address, timeout=60)
         self.rest_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.ws_api.connect(account_address,private_address,proxy_host,proxy_port)
         self.init_query()
@@ -379,7 +379,7 @@ class HyperliquidRestApi(RestClient):
         self.account_address = account_address
         self.private_address = private_address
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
-        self.rest_info = Info(REST_HOST, skip_ws=True,timeout=60)
+        self.rest_info = Info(REST_HOST,perp_dexs=["","xyz"], skip_ws=True, timeout=60)
         self.start()
         self.gateway.write_log(f"交易接口：{self.gateway_name}，REST API启动成功")
         self.query_contract()
@@ -410,8 +410,11 @@ class HyperliquidRestApi(RestClient):
         """
         查询合约信息
         """
-        perp_data = self.rest_info.meta()
-        self.on_query_perp_contract(perp_data)
+        # 查询加密货币和股票代币合约信息
+        dexs = ["","xyz"]
+        for dex in dexs:
+            perp_data = self.rest_info.meta(dex)
+            self.on_query_perp_contract(perp_data,dex)
         spot_data = self.rest_info.spot_meta()
         self.on_query_spot_contract(spot_data)
     # ----------------------------------------------------------------------------------------------------
@@ -466,7 +469,6 @@ class HyperliquidRestApi(RestClient):
             symbol = self.spot_symbol_name_map[req.symbol]
         else:
             symbol = req.symbol
-
         data = self.gateway.exchange_info.order(symbol, is_buy, req.volume, price, {"limit": {"tif": "Gtc"}},reduce_only,cloid=Cloid(orderid))
         self.on_send_order(data,order)
         return order.vt_orderid
@@ -768,7 +770,7 @@ class HyperliquidRestApi(RestClient):
         self.spot_inited = True
         self.gateway.write_log(f"交易接口：{self.gateway_name}，现货信息查询成功")
     # ----------------------------------------------------------------------------------------------------
-    def on_query_perp_contract(self, data: dict):
+    def on_query_perp_contract(self, data: dict,dex:str):
         """
         合约信息查询回报
         """
@@ -793,7 +795,11 @@ class HyperliquidRestApi(RestClient):
             )
             PRICE_DECIMAL_MAP[f"{contract.symbol}_{contract.exchange.value}"] = price_decimal
             self.gateway.on_contract(contract)
-        self.gateway.write_log(f"交易接口：{self.gateway_name}，合约信息查询成功")
+        if dex== "xyz":
+            msg = "股票合约"
+        else:
+            msg = "合约"
+        self.gateway.write_log(f"交易接口：{self.gateway_name}，{msg}信息查询成功")
     # ----------------------------------------------------------------------------------------------------
     def on_send_order(self, data: dict,order:OrderData) -> None:
         """
@@ -907,7 +913,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         self.account_address = account_address
         self.private_address = private_address
-        self.ws_info = Info(REST_HOST, skip_ws=False)
+        self.ws_info = Info(REST_HOST,perp_dexs=["","xyz"], skip_ws=False)
         self.init(WEBSOCKET_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.start()
         self.is_spot_symbol = self.gateway.rest_api.is_spot_symbol
@@ -1150,4 +1156,3 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
             
-
