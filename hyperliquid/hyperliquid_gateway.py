@@ -144,7 +144,7 @@ class HyperliquidGateway(BaseGateway):
 
     exchanges: List[Exchange] = [Exchange.HYPE,Exchange.HYPESPOT]
     # perp_dexs：""为原始交易所，xyz为股票代币交易所
-    perp_dexs = ["","xyz"]
+    perp_dexs = ["","xyz","km","flx","vntl"]
     get_file_path = GetFilePath()
     # ----------------------------------------------------------------------------------------------------
     def __init__(self, event_engine: EventEngine, gateway_name: str = "HYPERLIQUID") -> None:
