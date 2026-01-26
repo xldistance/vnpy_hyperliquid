@@ -40,6 +40,10 @@ def subscription_to_identifier(subscription: Subscription) -> str:
         return f'activeAssetCtx:{subscription["coin"].lower()}'
     elif subscription["type"] == "activeAssetData":
         return f'activeAssetData:{subscription["coin"].lower()},{subscription["user"].lower()}'
+    elif subscription["type"] == "clearinghouseState":
+        return f"clearinghouseState:{subscription["dex"].lower()}"
+    elif subscription["type"] == "openOrders":
+        return f"openOrders:{subscription["dex"].lower()}"
 
 
 def ws_msg_to_identifier(ws_msg: WsMsg) -> Optional[str]:
@@ -75,6 +79,10 @@ def ws_msg_to_identifier(ws_msg: WsMsg) -> Optional[str]:
         return f'activeAssetCtx:{ws_msg["data"]["coin"].lower()}'
     elif ws_msg["channel"] == "activeAssetData":
         return f'activeAssetData:{ws_msg["data"]["coin"].lower()},{ws_msg["data"]["user"].lower()}'
+    elif ws_msg["channel"] == "clearinghouseState":
+        return f"clearinghouseState:{ws_msg["data"]["dex"].lower()}"
+    elif ws_msg["channel"] == "openOrders":
+        return f"openOrders:{ws_msg["data"]["dex"].lower()}"
 
 
 class WebsocketManager(threading.Thread):
@@ -413,3 +421,4 @@ class WebsocketManager(threading.Thread):
                 
         self.active_subscriptions[identifier] = new_active_subscriptions
         return len(active_subscriptions) != len(new_active_subscriptions)
+    
