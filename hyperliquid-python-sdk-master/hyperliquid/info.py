@@ -12,7 +12,7 @@ from hyperliquid.utils.types import (
     cast,
 )
 from hyperliquid.websocket_manager import WebsocketManager
-
+from vnpy.trader.utility import save_connection_status, write_log
 
 class Info(API):
     def __init__(
@@ -59,10 +59,14 @@ class Info(API):
         if perp_dexs is None:
             perp_dexs = [""]
         else:
-            for i, perp_dex in enumerate(self.perp_dexs()[1:]):
-                # 构建者部署的永续合约交易所从 110000 开始
-                perp_dex_to_offset[perp_dex["name"]] = 110000 + i * 10000
-
+            try:
+                for i, perp_dex in enumerate(self.perp_dexs()[1:]):
+                    # 构建者部署的永续合约交易所从 110000 开始
+                    perp_dex_to_offset[perp_dex["name"]] = 110000 + i * 10000
+            except Exception as err:
+                msg = f"Info接口运行出错，错误信息：{err}"
+                write_log(msg,"HYPERLIQUID")
+                save_connection_status("HYPERLIQUID", False, msg)
         for perp_dex in perp_dexs:
             offset = perp_dex_to_offset[perp_dex]
             if perp_dex == "" and meta is not None:
@@ -632,7 +636,10 @@ class Info(API):
 
     def query_perp_deploy_auction_status(self) -> Any:
         return self.post("/info", {"type": "perpDeployAuctionStatus"})
-
+    
+    def query_user_dex_abstraction_state(self, user: str) -> Any:
+        return self.post("/info", {"type": "userDexAbstraction", "user": user})
+    
     def historical_orders(self, user: str) -> Any:
         """获取用户的历史订单。
 
@@ -748,7 +755,8 @@ class Info(API):
             or subscription["type"] == "bbo"
             or subscription["type"] == "activeAssetCtx"
         ):
-            subscription["coin"] = self.name_to_coin[subscription["coin"]]
+            if subscription["coin"] in self.name_to_coin:
+                subscription["coin"] = self.name_to_coin[subscription["coin"]]
 
     def subscribe(self, subscription: Subscription, callback: Callable[[Any], None]) -> int:
         self._remap_coin_subscription(subscription)
