@@ -143,7 +143,7 @@ class HyperliquidGateway(BaseGateway):
     }
 
     exchanges: List[Exchange] = [Exchange.HYPE,Exchange.HYPESPOT]
-    # perp_dexs：""为原始交易所，xyz为股票代币交易所
+    # perp_dexs：""为原始交易所，其他为第三方交易所
     perp_dexs = ["","xyz","km","flx","vntl"]
     get_file_path = GetFilePath()
     # ----------------------------------------------------------------------------------------------------
@@ -271,12 +271,13 @@ class HyperliquidGateway(BaseGateway):
                 symbol=symbol,
                 exchange=exchange,
                 interval=Interval.MINUTE,
-                start=datetime.now(TZ_INFO) - timedelta(minutes=1440),
+                start=datetime.now(TZ_INFO) - timedelta(minutes=200),
                 end=datetime.now(TZ_INFO),
                 gateway_name=self.gateway_name,
             )
             self.rest_api.query_history(req)
             self.rest_api.set_leverage(symbol,exchange)
+            sleep(1)
     # ----------------------------------------------------------------------------------------------------
     def process_timer_event(self, event) -> None:
         """
@@ -293,7 +294,7 @@ class HyperliquidGateway(BaseGateway):
         if self.count < 5:
             return
         self.count = 0
-        #self.rest_api.query_spot_account()
+        self.rest_api.query_spot_account()
         # 代理api过期15天前发送提醒到钉钉
         remain_datetime = self.expire_datetime - datetime.now()
         if remain_datetime <= timedelta(days = 15):
@@ -389,8 +390,9 @@ class HyperliquidRestApi(RestClient):
         """
         查询永续账户资金
         """
-        data = self.rest_info.user_state(self.account_address)
-        self.on_query_account(data)
+        for dex in self.gateway.perp_dexs:
+            data = self.rest_info.user_state(self.account_address,dex)
+            self.on_query_account(data,dex)
     # ----------------------------------------------------------------------------------------------------        
     def query_spot_account(self) -> None:
         """
@@ -404,8 +406,9 @@ class HyperliquidRestApi(RestClient):
         查询活动委托单
         """
         account_address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
-        data = self.rest_info.frontend_open_orders(account_address)
-        self.on_query_order(data)
+        for dex in self.gateway.perp_dexs:
+            data = self.rest_info.frontend_open_orders(account_address,dex)
+            self.on_query_order(data)
     # ----------------------------------------------------------------------------------------------------
     def query_contract(self) -> None:
         """
@@ -546,7 +549,7 @@ class HyperliquidRestApi(RestClient):
                 )
         for raw in data:
             symbol = raw["coin"]
-            # 持仓过滤非现货USDC
+            # 持仓过滤非可交易现货USDC
             if symbol == "USDC":
                 continue
             long_position = PositionData(
@@ -604,13 +607,16 @@ class HyperliquidRestApi(RestClient):
                     w1.writeheader()
                 w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
-    def on_query_account(self, data: dict) -> None:
+    def on_query_account(self, data: dict,dex:str) -> None:
         """
         合约资金查询回报
         """
         if not data or "assetPositions" not in data:
             return
-        self.on_query_position(data["assetPositions"])
+        self.on_query_position(data["assetPositions"],dex)
+        # 使用默认交易所(dex为"")USDC资金，USDH资金在现货资金账户里面
+        if dex:
+            return
         account_data = data["marginSummary"]
         account: AccountData = AccountData(
             accountid="USDC" + "_" + self.gateway_name,
@@ -645,7 +651,7 @@ class HyperliquidRestApi(RestClient):
                     w1.writeheader()
                 w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
-    def on_query_position(self, data: dict | list) -> None:
+    def on_query_position(self, data: dict | list,dex:str) -> None:
         """
         持仓查询回报
         """
@@ -657,7 +663,12 @@ class HyperliquidRestApi(RestClient):
             # 过滤现货合约
             if exchange == "HYPESPOT":
                 continue
-            if symbol not in holding_coins:
+            # 如果合约已有持仓，跳过
+            if symbol in holding_coins:
+                continue
+            # 检查合约是否属于当前DEX
+            if symbol.startswith(dex) or (":" not in symbol and not dex):
+                # 重置该合约的持仓为0
                 self.create_position_pair(
                     symbol=symbol,
                     exchange=Exchange.HYPE,
@@ -665,7 +676,6 @@ class HyperliquidRestApi(RestClient):
                     avg_price=0,
                     unrealized_pnl=0
                 )
-
         for raw in data:
             raw = raw["position"]
             self.create_position_pair(
@@ -869,7 +879,8 @@ class HyperliquidRestApi(RestClient):
                 buf.append(bar)
             history.extend(buf)
             start_time = end_time + timedelta(minutes=1)
-
+            # 等待100毫秒防止请求过载
+            #sleep(0.1)
         if history:
             try:
                 database_manager.save_bar_data(history, False)
