@@ -271,7 +271,7 @@ class HyperliquidGateway(BaseGateway):
                 symbol=symbol,
                 exchange=exchange,
                 interval=Interval.MINUTE,
-                start=datetime.now(TZ_INFO) - timedelta(minutes=200),
+                start=datetime.now(TZ_INFO) - timedelta(minutes=1440),
                 end=datetime.now(TZ_INFO),
                 gateway_name=self.gateway_name,
             )
@@ -549,6 +549,22 @@ class HyperliquidRestApi(RestClient):
                 )
         for raw in data:
             symbol = raw["coin"]
+            volume = float(raw["total"])
+            frozen = float(raw["hold"])
+            
+            account: AccountData = AccountData(
+                accountid=f"{symbol}_SPOT_{self.gateway_name}",
+                balance=volume,
+                datetime=datetime.now(TZ_INFO),
+                file_name=self.gateway.account_file_name,
+                gateway_name=self.gateway_name,
+            )
+            account.available = account.balance - frozen
+            account.frozen = account.balance - account.available
+            if account.balance:
+                self.gateway.on_account(account)
+                # 保存账户资金信息
+                self.accounts_info[account.accountid] = account.__dict__
             # 持仓过滤非可交易现货USDC
             if symbol == "USDC":
                 continue
@@ -556,9 +572,9 @@ class HyperliquidRestApi(RestClient):
                 symbol = symbol,
                 exchange= Exchange.HYPESPOT,
                 gateway_name=self.gateway_name,
-                volume=float(raw["total"]),
+                volume=volume,
                 direction=Direction.LONG,
-                frozen=float(raw["hold"]),
+                frozen=frozen,
             )
             short_position = PositionData(
                 symbol=symbol,
@@ -572,21 +588,6 @@ class HyperliquidRestApi(RestClient):
             )
             self.gateway.on_position(long_position)
             self.gateway.on_position(short_position)
-
-        for raw in data:
-            account: AccountData = AccountData(
-                accountid=f"{raw['coin']}_SPOT_{self.gateway_name}",
-                balance=float(raw["total"]),
-                datetime=datetime.now(TZ_INFO),
-                file_name=self.gateway.account_file_name,
-                gateway_name=self.gateway_name,
-            )
-            account.available = account.balance - float(raw["hold"])
-            account.frozen = account.balance - account.available
-            if account.balance:
-                self.gateway.on_account(account)
-                # 保存账户资金信息
-                self.accounts_info[account.accountid] = account.__dict__
 
         if not self.accounts_info:
             return
