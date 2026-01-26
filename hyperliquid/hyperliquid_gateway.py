@@ -161,7 +161,6 @@ class HyperliquidGateway(BaseGateway):
         self.recording_list = [vt_symbol for vt_symbol in self.recording_list if is_target_contract(vt_symbol, self.gateway_name)]
         # 查询历史数据合约列表
         self.history_contracts = copy(self.recording_list)
-        self.query_functions = [self.query_order]
         # 查询历史数据状态
         self.history_status = True
         # 订阅逐笔成交数据状态
@@ -284,7 +283,8 @@ class HyperliquidGateway(BaseGateway):
         处理定时事件
         """
         # 每秒查询一次永续账户资金
-        self.query_account()
+        #self.query_account()
+
         # 删除过期trade_ids
         if len(self.ws_api.trade_ids) > 200:
             self.ws_api.trade_ids.pop(0)
@@ -304,20 +304,18 @@ class HyperliquidGateway(BaseGateway):
     # ----------------------------------------------------------------------------------------------------
     def process_query_order(self,event) -> None:
         """
-        定时循环执行查询函数
+        定时循环执行查询活动委托单
         """
         self.query_count += 1
         if self.query_count < 6:
             return
         self.query_count = 0
-        function = self.query_functions.pop(0)
-        function()
-        self.query_functions.append(function)
+        self.query_order()
     # ----------------------------------------------------------------------------------------------------
     def init_query(self):
         """ """
         self.event_engine.register(EVENT_TIMER, self.process_timer_event)
-        self.event_engine.register(EVENT_TIMER, self.process_query_order)
+        #self.event_engine.register(EVENT_TIMER, self.process_query_order)
         if self.history_status:
             self.event_engine.register(EVENT_TIMER, self.query_history)
     # ----------------------------------------------------------------------------------------------------
@@ -918,6 +916,8 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.ping_count = 0
         self.trade_ids = [] # trade_id过滤
         self.max_volume_map:Dict[str,float] = {}  # symbol最大合约委托量映射
+        self.account_date = None  # 账户日期
+        self.accounts_info: Dict[str, dict] = {}
     # ----------------------------------------------------------------------------------------------------
     def connect(self, account_address: str, private_address: str, proxy_host: str, proxy_port: int) -> None:
         """
@@ -979,13 +979,18 @@ class HyperliquidWebsocketApi(WebsocketClient):
         else:
             subscribe_symbol = req.symbol
         address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
+        # 订阅深度
         self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
         self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
         self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
         self.ws_info.subscribe({ "type": "activeAssetData", "user": address, "coin": subscribe_symbol}, self.on_asset_data)
         self.ws_info.subscribe({"type": "userFills", "user": address}, self.on_trade)
         self.ws_info.subscribe({"type": "orderUpdates", "user": address}, self.on_order)
+        for dex in self.gateway.perp_dexs:
+            self.ws_info.subscribe({"type": "clearinghouseState", "user": address,"dex":dex}, self.on_asset_position)
+            self.ws_info.subscribe({"type": "openOrders", "user": address,"dex":dex}, self.on_open_orders)
         if self.gateway.book_trade_status:
+            # 逐笔委托簿
             self.ws_info.subscribe({"type": "bbo", "coin": subscribe_symbol}, self.on_bbo)
     # ----------------------------------------------------------------------------------------------------
     def on_packet(self, packet: Any) -> None:
@@ -1045,6 +1050,9 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.gateway.on_tick(tick)
     # ----------------------------------------------------------------------------------------------------
     def on_public_trade(self,packet:dict):
+        """
+        收到逐笔成交数据
+        """
         data = packet["data"]
         for data in packet["data"]:
             symbol = data["coin"]
@@ -1164,6 +1172,156 @@ class HyperliquidWebsocketApi(WebsocketClient):
             # 添加部分成交委托状态，hyperliquid部分成交status为filled
             if (order.status not in [Status.CANCELLED,Status.REJECTED] and 0 < order.traded < order.volume):
                 order.status = Status.PARTTRADED
+            if "reduceOnly" in raw and raw["reduceOnly"]:
+                order.offset = Offset.CLOSE
+            self.gateway.on_order(order)
+    # -------------------------------------------------------------------------------------------------------
+    def create_position_pair(self, symbol: str, exchange: Exchange, volume: float, avg_price: float, unrealized_pnl: float):
+        """
+        创建多空持仓数据对
+        """
+        direction = Direction.LONG if volume >= 0 else Direction.SHORT
+        
+        # 创建持仓对象
+        position_1 = PositionData(
+            symbol=symbol,
+            exchange=exchange,
+            direction=direction,
+            volume=abs(volume),
+            price=avg_price,
+            pnl=unrealized_pnl,
+            gateway_name=self.gateway_name,
+        )
+        
+        # 创建对立持仓对象
+        position_2 = PositionData(
+            symbol=symbol,
+            exchange=exchange,
+            direction=OPPOSITE_DIRECTION[direction],
+            volume=0,
+            price=0,
+            pnl=0,
+            gateway_name=self.gateway_name,
+        )
+        
+        self.gateway.on_position(position_1)
+        self.gateway.on_position(position_2)
+    # ----------------------------------------------------------------------------------------------------
+    def on_asset_position(self,packet:dict):
+        """
+        收到永续合约账户资金和持仓回报
+        """
+        data = packet["data"]["clearinghouseState"]
+        dex = packet["data"]["dex"]
+        # 使用默认交易所(dex为"")账户资金
+        account_data = data["marginSummary"]
+        pos_data = data["assetPositions"]
+        # 使用默认交易所(dex为"")USDC资金，USDH资金在现货资金账户里面
+        if not dex:
+            account_data = data["marginSummary"]
+            account: AccountData = AccountData(
+                accountid="USDC" + "_" + self.gateway_name,
+                balance=float(account_data["accountValue"]),
+                frozen=float(account_data["totalMarginUsed"]),
+                datetime=get_local_datetime(data["time"]),
+                file_name=self.gateway.account_file_name,
+                gateway_name=self.gateway_name,
+            )
+            account.available = account.balance - account.frozen
+            if account.balance:
+                self.gateway.on_account(account)
+                # 保存账户资金信息
+                self.accounts_info[account.accountid] = account.__dict__
+
+            if not self.accounts_info:
+                return
+            accounts_info = list(self.accounts_info.values())
+            account_date = accounts_info[-1]["datetime"].date()
+            account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
+            write_header = not Path(account_path).exists()
+            additional_writing = self.account_date and self.account_date != account_date
+            self.account_date = account_date
+            # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
+            if not write_header and not additional_writing:
+                return
+            write_mode = "w" if write_header else "a"
+            for account_data in accounts_info:
+                with open(account_path, write_mode, newline="") as f1:
+                    w1 = csv.DictWriter(f1, list(account_data))
+                    if write_header:
+                        w1.writeheader()
+                    w1.writerow(account_data)
+        # 有持仓的合约symbol
+        holding_coins = [item["position"]["coin"] for item in pos_data]
+        # 不在持仓推送列表中的symbol持仓赋值为0
+        for symbol_exchange in self.ticks:
+            symbol,exchange = symbol_exchange.split("_")
+            # 过滤现货合约
+            if exchange == "HYPESPOT":
+                continue
+            # 如果合约已有持仓，跳过
+            if symbol in holding_coins:
+                continue
+            # 检查合约是否属于当前DEX
+            if symbol.startswith(dex) or (":" not in symbol and not dex):
+                # 重置该合约的持仓为0
+                self.create_position_pair(
+                    symbol=symbol,
+                    exchange=Exchange.HYPE,
+                    volume=0,
+                    avg_price=0,
+                    unrealized_pnl=0
+                )
+        for raw in pos_data:
+            raw = raw["position"]
+            self.create_position_pair(
+                symbol=raw["coin"],
+                exchange=Exchange.HYPE,
+                volume=float(raw["szi"]),
+                avg_price=float(raw["entryPx"]),
+                unrealized_pnl=float(raw["unrealizedPnl"])
+            )      
+    # ----------------------------------------------------------------------------------------------------
+    def on_open_orders(self,packet:dict):
+        """
+        收到活动委托单回报
+        """
+        data = packet["data"]["orders"]
+        if not data:
+            return
+        for raw in data:
+            if not isinstance(raw,dict):
+                return
+            symbol = raw["coin"]
+            if self.is_spot_symbol(symbol):
+                symbol = self.spot_name_symbol_map[symbol]
+                exchange = Exchange.HYPESPOT
+            else:
+                exchange = Exchange.HYPE
+            volume = float(raw["origSz"])
+            untrade_volume = float(raw["sz"])
+            trade_volume = volume - untrade_volume
+            if volume == untrade_volume:
+                status = Status.NOTTRADED
+            elif 0 < untrade_volume < volume:
+                status = Status.PARTTRADED
+            if raw.get("cloid"):
+                orderid = raw["cloid"]
+                self.gateway.system_local_orderid_map[raw["oid"]] = orderid
+            else:
+                orderid = self.gateway.system_local_orderid_map.get(raw["oid"],raw["oid"])
+            order: OrderData = OrderData(
+                orderid=orderid,
+                symbol=symbol,
+                exchange=exchange,
+                price=float(raw["limitPx"]),
+                volume=volume,
+                direction=DIRECTION_HYPERLIQUID2VT[raw["side"]],
+                traded=trade_volume,
+                status=status,
+                datetime=get_local_datetime(raw["timestamp"]),
+                gateway_name=self.gateway_name,
+            )
             if "reduceOnly" in raw and raw["reduceOnly"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
