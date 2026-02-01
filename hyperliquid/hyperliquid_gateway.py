@@ -166,9 +166,10 @@ class HyperliquidGateway(BaseGateway):
         # 订阅逐笔成交数据状态
         self.book_trade_status: bool = False
         self.count:int = 0
-        self.query_count:int = 0
         # 系统委托单id和自定义委托单id映射字典
         self.system_local_orderid_map = {}
+        # 轮询方法
+        self.query_funcs = [self.query_order,self.query_account,self.rest_api.query_spot_account]
         # 是否使用代理api，默认使用代理api交易，避免泄露私钥，安全性更高
         self.use_api_agent:bool = True
         # 是否创建代理api
@@ -282,19 +283,19 @@ class HyperliquidGateway(BaseGateway):
         """
         处理定时事件
         """
-        # 每秒查询一次永续账户资金
-        #self.query_account()
-
         # 删除过期trade_ids
-        if len(self.ws_api.trade_ids) > 200:
-            self.ws_api.trade_ids.pop(0)
+        trade_ids = self.ws_api.trade_ids
+        if len(trade_ids) > 200:
+            trade_ids.pop(0)
 
-        # 5秒查询一次现货账户资金
+        # 5秒轮训一次查询
         self.count += 1
         if self.count < 5:
             return
         self.count = 0
-        self.rest_api.query_spot_account()
+        func = self.query_funcs.pop(0)
+        func()
+        self.query_funcs.append(func)
         # 代理api过期15天前发送提醒到钉钉
         remain_datetime = self.expire_datetime - datetime.now()
         if remain_datetime <= timedelta(days = 15):
@@ -302,20 +303,9 @@ class HyperliquidGateway(BaseGateway):
             self.write_log(msg)
             error_monitor.send_text(msg)
     # ----------------------------------------------------------------------------------------------------
-    def process_query_order(self,event) -> None:
-        """
-        定时循环执行查询活动委托单
-        """
-        self.query_count += 1
-        if self.query_count < 6:
-            return
-        self.query_count = 0
-        self.query_order()
-    # ----------------------------------------------------------------------------------------------------
     def init_query(self):
         """ """
         self.event_engine.register(EVENT_TIMER, self.process_timer_event)
-        #self.event_engine.register(EVENT_TIMER, self.process_query_order)
         if self.history_status:
             self.event_engine.register(EVENT_TIMER, self.query_history)
     # ----------------------------------------------------------------------------------------------------
