@@ -144,7 +144,8 @@ class HyperliquidGateway(BaseGateway):
 
     exchanges: List[Exchange] = [Exchange.HYPE,Exchange.HYPESPOT]
     # perp_dexs：""为原始交易所，其他为第三方交易所
-    perp_dexs = ["","xyz","km","flx","vntl"]
+    #perp_dexs = ["","xyz","km","hyna","cash","flx","vntl"]
+    perp_dexs = ["","xyz","km"]
     get_file_path = GetFilePath()
     # ----------------------------------------------------------------------------------------------------
     def __init__(self, event_engine: EventEngine, gateway_name: str = "HYPERLIQUID") -> None:
@@ -1206,6 +1207,36 @@ class HyperliquidWebsocketApi(WebsocketClient):
         # 使用默认交易所(dex为"")账户资金
         account_data = data["marginSummary"]
         pos_data = data["assetPositions"]
+        # 有持仓的合约symbol
+        holding_coins = [item["position"]["coin"] for item in pos_data]
+        # 不在持仓推送列表中的symbol持仓赋值为0
+        for symbol_exchange in self.ticks:
+            symbol,exchange = symbol_exchange.split("_")
+            # 过滤现货合约
+            if exchange == "HYPESPOT":
+                continue
+            # 如果合约已有持仓，跳过
+            if symbol in holding_coins:
+                continue
+            # 检查合约是否属于当前DEX
+            if symbol.startswith(dex) or (":" not in symbol and not dex):
+                # 重置该合约的持仓为0
+                self.create_position_pair(
+                    symbol=symbol,
+                    exchange=Exchange.HYPE,
+                    volume=0,
+                    avg_price=0,
+                    unrealized_pnl=0
+                )
+        for raw in pos_data:
+            raw = raw["position"]
+            self.create_position_pair(
+                symbol=raw["coin"],
+                exchange=Exchange.HYPE,
+                volume=float(raw["szi"]),
+                avg_price=float(raw["entryPx"]),
+                unrealized_pnl=float(raw["unrealizedPnl"])
+            )
         # 使用默认交易所(dex为"")USDC资金，USDH资金在现货资金账户里面
         if not dex:
             account_data = data["marginSummary"]
@@ -1241,36 +1272,6 @@ class HyperliquidWebsocketApi(WebsocketClient):
                     if write_header:
                         w1.writeheader()
                     w1.writerow(account_data)
-        # 有持仓的合约symbol
-        holding_coins = [item["position"]["coin"] for item in pos_data]
-        # 不在持仓推送列表中的symbol持仓赋值为0
-        for symbol_exchange in self.ticks:
-            symbol,exchange = symbol_exchange.split("_")
-            # 过滤现货合约
-            if exchange == "HYPESPOT":
-                continue
-            # 如果合约已有持仓，跳过
-            if symbol in holding_coins:
-                continue
-            # 检查合约是否属于当前DEX
-            if symbol.startswith(dex) or (":" not in symbol and not dex):
-                # 重置该合约的持仓为0
-                self.create_position_pair(
-                    symbol=symbol,
-                    exchange=Exchange.HYPE,
-                    volume=0,
-                    avg_price=0,
-                    unrealized_pnl=0
-                )
-        for raw in pos_data:
-            raw = raw["position"]
-            self.create_position_pair(
-                symbol=raw["coin"],
-                exchange=Exchange.HYPE,
-                volume=float(raw["szi"]),
-                avg_price=float(raw["entryPx"]),
-                unrealized_pnl=float(raw["unrealizedPnl"])
-            )      
     # ----------------------------------------------------------------------------------------------------
     def on_open_orders(self,packet:dict):
         """
