@@ -927,7 +927,7 @@ class HyperliquidWebsocketApi(WebsocketClient):
         发送ping
         """
         self.ping_count += 1
-        if self.ping_count < 30:
+        if self.ping_count < 20:
             return
         self.ping_count = 0
         self.send_packet({ "method": "ping" })
@@ -1317,3 +1317,4 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
             
+
