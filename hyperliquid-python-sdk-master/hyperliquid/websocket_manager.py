@@ -193,7 +193,7 @@ class WebsocketManager(threading.Thread):
 
     def send_ping(self):
         """发送心跳包"""
-        while not self.stop_event.is_set() and not self.ping_stop_event.wait(30):
+        while not self.stop_event.is_set() and not self.ping_stop_event.wait(20):
             if not self.is_connected or self.ws is None or not self.ws.keep_running:
                 break
             try:
