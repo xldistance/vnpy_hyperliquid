@@ -64,7 +64,7 @@ class Info(API):
                     # 构建者部署的永续合约交易所从 110000 开始
                     perp_dex_to_offset[perp_dex["name"]] = 110000 + i * 10000
             except Exception as err:
-                msg = f"Info接口运行出错，错误信息：{err}"
+                msg = f"Info接口部署永续合约出错，错误信息：{err}"
                 write_log(msg,"HYPERLIQUID")
                 save_connection_status("HYPERLIQUID", False, msg)
         for perp_dex in perp_dexs:
@@ -508,10 +508,15 @@ class Info(API):
                 ...
             ]
         """
-        if name in self.name_to_coin:
-            req = {"coin": self.name_to_coin[name], "interval": interval, "startTime": startTime, "endTime": endTime}
-            return self.post("/info", {"type": "candleSnapshot", "req": req})
-        return []
+        try:
+            if name in self.name_to_coin:
+                req = {"coin": self.name_to_coin[name], "interval": interval, "startTime": startTime, "endTime": endTime}
+                return self.post("/info", {"type": "candleSnapshot", "req": req})
+        except Exception as err:
+            msg = f"Info接口获取K线数据出错，错误信息：{err}"
+            write_log(msg,"HYPERLIQUID")
+            save_connection_status("HYPERLIQUID", False, msg)
+            return []
     def user_fees(self, address: str) -> Any:
         """获取与用户相关的交易量活动。
         POST /info
