@@ -144,8 +144,7 @@ class HyperliquidGateway(BaseGateway):
 
     exchanges: List[Exchange] = [Exchange.HYPE,Exchange.HYPESPOT]
     # perp_dexs：""为原始交易所，其他为第三方交易所
-    #perp_dexs = ["","xyz","km","hyna","cash","flx","vntl"]
-    perp_dexs = ["","xyz","km"]
+    perp_dexs = ["","xyz","km","hyna","cash","flx","vntl"]
     get_file_path = GetFilePath()
     # ----------------------------------------------------------------------------------------------------
     def __init__(self, event_engine: EventEngine, gateway_name: str = "HYPERLIQUID") -> None:
@@ -170,7 +169,8 @@ class HyperliquidGateway(BaseGateway):
         # 系统委托单id和自定义委托单id映射字典
         self.system_local_orderid_map = {}
         # 轮询方法
-        self.query_funcs = [self.query_order,self.query_account,self.rest_api.query_spot_account]
+        #self.query_funcs = [self.query_order,self.query_account,self.rest_api.query_spot_account]
+        self.query_funcs = [self.rest_api.query_spot_account]
         # 是否使用代理api，默认使用代理api交易，避免泄露私钥，安全性更高
         self.use_api_agent:bool = True
         # 是否创建代理api
@@ -1238,40 +1238,41 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 unrealized_pnl=float(raw["unrealizedPnl"])
             )
         # 使用默认交易所(dex为"")USDC资金，USDH资金在现货资金账户里面
-        if not dex:
-            account_data = data["marginSummary"]
-            account: AccountData = AccountData(
-                accountid="USDC" + "_" + self.gateway_name,
-                balance=float(account_data["accountValue"]),
-                frozen=float(account_data["totalMarginUsed"]),
-                datetime=get_local_datetime(data["time"]),
-                file_name=self.gateway.account_file_name,
-                gateway_name=self.gateway_name,
-            )
-            account.available = account.balance - account.frozen
-            if account.balance:
-                self.gateway.on_account(account)
-                # 保存账户资金信息
-                self.accounts_info[account.accountid] = account.__dict__
+        if dex:
+            return
+        account_data = data["marginSummary"]
+        account: AccountData = AccountData(
+            accountid="USDC" + "_" + self.gateway_name,
+            balance=float(account_data["accountValue"]),
+            frozen=float(account_data["totalMarginUsed"]),
+            datetime=get_local_datetime(data["time"]),
+            file_name=self.gateway.account_file_name,
+            gateway_name=self.gateway_name,
+        )
+        account.available = account.balance - account.frozen
+        if account.balance:
+            self.gateway.on_account(account)
+            # 保存账户资金信息
+            self.accounts_info[account.accountid] = account.__dict__
 
-            if not self.accounts_info:
-                return
-            accounts_info = list(self.accounts_info.values())
-            account_date = accounts_info[-1]["datetime"].date()
-            account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
-            write_header = not Path(account_path).exists()
-            additional_writing = self.account_date and self.account_date != account_date
-            self.account_date = account_date
-            # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
-            if not write_header and not additional_writing:
-                return
-            write_mode = "w" if write_header else "a"
-            for account_data in accounts_info:
-                with open(account_path, write_mode, newline="") as f1:
-                    w1 = csv.DictWriter(f1, list(account_data))
-                    if write_header:
-                        w1.writeheader()
-                    w1.writerow(account_data)
+        if not self.accounts_info:
+            return
+        accounts_info = list(self.accounts_info.values())
+        account_date = accounts_info[-1]["datetime"].date()
+        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
+        write_header = not Path(account_path).exists()
+        additional_writing = self.account_date and self.account_date != account_date
+        self.account_date = account_date
+        # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
+        if not write_header and not additional_writing:
+            return
+        write_mode = "w" if write_header else "a"
+        for account_data in accounts_info:
+            with open(account_path, write_mode, newline="") as f1:
+                w1 = csv.DictWriter(f1, list(account_data))
+                if write_header:
+                    w1.writeheader()
+                w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
     def on_open_orders(self,packet:dict):
         """
@@ -1317,4 +1318,3 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
             
-
