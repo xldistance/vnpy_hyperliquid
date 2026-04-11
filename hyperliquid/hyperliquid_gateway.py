@@ -272,7 +272,7 @@ class HyperliquidGateway(BaseGateway):
                 symbol=symbol,
                 exchange=exchange,
                 interval=Interval.MINUTE,
-                start=datetime.now(TZ_INFO) - timedelta(minutes=1440),
+                start=datetime.now(TZ_INFO) - timedelta(minutes=100),
                 end=datetime.now(TZ_INFO),
                 gateway_name=self.gateway_name,
             )
@@ -540,9 +540,11 @@ class HyperliquidRestApi(RestClient):
             symbol = raw["coin"]
             volume = float(raw["total"])
             frozen = float(raw["hold"])
-            
+            # USDC,USDH视为合约结算货币
+            if symbol not in ["USDC","USDH"]:
+                symbol = f"{symbol}_SPOT"
             account: AccountData = AccountData(
-                accountid=f"{symbol}_SPOT_{self.gateway_name}",
+                accountid=f"{symbol}_{self.gateway_name}",
                 balance=volume,
                 datetime=datetime.now(TZ_INFO),
                 file_name=self.gateway.account_file_name,
