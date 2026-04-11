@@ -540,11 +540,9 @@ class HyperliquidRestApi(RestClient):
             symbol = raw["coin"]
             volume = float(raw["total"])
             frozen = float(raw["hold"])
-            # USDC,USDH视为合约结算货币
-            if symbol not in ["USDC","USDH"]:
-                symbol = f"{symbol}_SPOT"
+            exchange = Exchange.HYPESPOT
             account: AccountData = AccountData(
-                accountid=f"{symbol}_{self.gateway_name}",
+                accountid=f"{symbol}_SPOT_{self.gateway_name}",
                 balance=volume,
                 datetime=datetime.now(TZ_INFO),
                 file_name=self.gateway.account_file_name,
@@ -561,7 +559,7 @@ class HyperliquidRestApi(RestClient):
                 continue
             long_position = PositionData(
                 symbol = symbol,
-                exchange= Exchange.HYPESPOT,
+                exchange= exchange,
                 gateway_name=self.gateway_name,
                 volume=volume,
                 direction=Direction.LONG,
@@ -569,7 +567,7 @@ class HyperliquidRestApi(RestClient):
             )
             short_position = PositionData(
                 symbol=symbol,
-                exchange=Exchange.HYPESPOT,
+                exchange=exchange,
                 direction=Direction.SHORT,
                 volume=0,
                 price=0,
@@ -1170,6 +1168,8 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         data = packet["data"]["clearinghouseState"]
         dex = packet["data"]["dex"]
+        # 使用默认交易所(dex为"")账户资金
+        account_data = data["marginSummary"]
         pos_data = data["assetPositions"]
         # 有持仓的合约symbol
         holding_coins = [item["position"]["coin"] for item in pos_data]
