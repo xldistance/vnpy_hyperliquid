@@ -606,42 +606,6 @@ class HyperliquidRestApi(RestClient):
         if not data or "assetPositions" not in data:
             return
         self.on_query_position(data["assetPositions"],dex)
-        # 使用默认交易所(dex为"")USDC资金，USDH资金在现货资金账户里面
-        if dex:
-            return
-        account_data = data["marginSummary"]
-        account: AccountData = AccountData(
-            accountid="USDC" + "_" + self.gateway_name,
-            balance=float(account_data["accountValue"]),
-            frozen=float(account_data["totalMarginUsed"]),
-            datetime=get_local_datetime(data["time"]),
-            file_name=self.gateway.account_file_name,
-            gateway_name=self.gateway_name,
-        )
-        account.available = account.balance - account.frozen
-        if account.balance:
-            self.gateway.on_account(account)
-            # 保存账户资金信息
-            self.accounts_info[account.accountid] = account.__dict__
-
-        if not self.accounts_info:
-            return
-        accounts_info = list(self.accounts_info.values())
-        account_date = accounts_info[-1]["datetime"].date()
-        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
-        write_header = not Path(account_path).exists()
-        additional_writing = self.account_date and self.account_date != account_date
-        self.account_date = account_date
-        # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
-        if not write_header and not additional_writing:
-            return
-        write_mode = "w" if write_header else "a"
-        for account_data in accounts_info:
-            with open(account_path, write_mode, newline="") as f1:
-                w1 = csv.DictWriter(f1, list(account_data))
-                if write_header:
-                    w1.writeheader()
-                w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
     def on_query_position(self, data: dict | list,dex:str) -> None:
         """
@@ -1206,8 +1170,6 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         data = packet["data"]["clearinghouseState"]
         dex = packet["data"]["dex"]
-        # 使用默认交易所(dex为"")账户资金
-        account_data = data["marginSummary"]
         pos_data = data["assetPositions"]
         # 有持仓的合约symbol
         holding_coins = [item["position"]["coin"] for item in pos_data]
@@ -1239,42 +1201,6 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 avg_price=float(raw["entryPx"]),
                 unrealized_pnl=float(raw["unrealizedPnl"])
             )
-        # 使用默认交易所(dex为"")USDC资金，USDH资金在现货资金账户里面
-        if dex:
-            return
-        account_data = data["marginSummary"]
-        account: AccountData = AccountData(
-            accountid="USDC" + "_" + self.gateway_name,
-            balance=float(account_data["accountValue"]),
-            frozen=float(account_data["totalMarginUsed"]),
-            datetime=get_local_datetime(data["time"]),
-            file_name=self.gateway.account_file_name,
-            gateway_name=self.gateway_name,
-        )
-        account.available = account.balance - account.frozen
-        if account.balance:
-            self.gateway.on_account(account)
-            # 保存账户资金信息
-            self.accounts_info[account.accountid] = account.__dict__
-
-        if not self.accounts_info:
-            return
-        accounts_info = list(self.accounts_info.values())
-        account_date = accounts_info[-1]["datetime"].date()
-        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
-        write_header = not Path(account_path).exists()
-        additional_writing = self.account_date and self.account_date != account_date
-        self.account_date = account_date
-        # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
-        if not write_header and not additional_writing:
-            return
-        write_mode = "w" if write_header else "a"
-        for account_data in accounts_info:
-            with open(account_path, write_mode, newline="") as f1:
-                w1 = csv.DictWriter(f1, list(account_data))
-                if write_header:
-                    w1.writeheader()
-                w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
     def on_open_orders(self,packet:dict):
         """
