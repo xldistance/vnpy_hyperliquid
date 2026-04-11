@@ -1168,8 +1168,6 @@ class HyperliquidWebsocketApi(WebsocketClient):
         """
         data = packet["data"]["clearinghouseState"]
         dex = packet["data"]["dex"]
-        # 使用默认交易所(dex为"")账户资金
-        account_data = data["marginSummary"]
         pos_data = data["assetPositions"]
         # 有持仓的合约symbol
         holding_coins = [item["position"]["coin"] for item in pos_data]
