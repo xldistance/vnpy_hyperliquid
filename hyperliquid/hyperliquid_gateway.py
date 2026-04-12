@@ -43,7 +43,7 @@ from vnpy.trader.object import (
     TickData,
     TradeData,
 )
-from vnpy.trader.setting import hyperliquid_okx_account,hyperliquid_binance_account  # 导入账户字典
+from vnpy.trader.setting import hyperliquid_binance_account  # 导入账户字典
 from vnpy.trader.utility import (
     TZ_INFO,
     GetFilePath,
@@ -181,7 +181,6 @@ class HyperliquidGateway(BaseGateway):
         连接交易接口
         """
         if not log_account:
-            #log_account = hyperliquid_okx_account
             log_account = hyperliquid_binance_account
         account_address: str = log_account["account_address"]
 
@@ -194,9 +193,14 @@ class HyperliquidGateway(BaseGateway):
         self.account_file_name = log_account["account_file_name"]
         account: LocalAccount = eth_account.Account.from_key(private_address)
         account_address = account_address if self.use_api_agent else account.address
-        self.exchange_info = HyperliquidExchange(account, REST_HOST, perp_dexs=self.perp_dexs, account_address=account_address, timeout=60)
-        self.rest_api.connect(account_address,private_address,proxy_host,proxy_port)
-        self.ws_api.connect(account_address,private_address,proxy_host,proxy_port)
+        # 金库带单公开地址
+        if "vault_address" in log_account:
+            vault_address = log_account["vault_address"]
+        else:
+            vault_address = None
+        self.exchange_info = HyperliquidExchange(account, REST_HOST, perp_dexs=self.perp_dexs, account_address=account_address,vault_address = vault_address, timeout=60)
+        self.rest_api.connect(account_address,vault_address,private_address,proxy_host,proxy_port)
+        self.ws_api.connect(account_address,vault_address,private_address,proxy_host,proxy_port)
         self.init_query()
 
         if self.generate_agent_api:
@@ -360,6 +364,7 @@ class HyperliquidRestApi(RestClient):
     def connect(
         self,
         account_address: str,
+        vault_address: str,
         private_address: str,
         proxy_host: str,
         proxy_port: int,
@@ -368,6 +373,7 @@ class HyperliquidRestApi(RestClient):
         连接REST服务器
         """
         self.account_address = account_address
+        self.vault_address = vault_address
         self.private_address = private_address
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.rest_info = Info(REST_HOST,perp_dexs=self.gateway.perp_dexs, skip_ws=True, timeout=60)
@@ -379,14 +385,18 @@ class HyperliquidRestApi(RestClient):
         """
         查询永续账户资金
         """
+        addr = self.vault_address or self.account_address
         for dex in self.gateway.perp_dexs:
-            data = self.rest_info.user_state(self.account_address,dex)
+            data = self.rest_info.user_state(addr,dex)
             self.on_query_account(data,dex)
     # ----------------------------------------------------------------------------------------------------        
     def query_spot_account(self) -> None:
         """
         查询现货账户资金
         """
+        # 金库带单地址不支持通过spot_user_state查询账户资金
+        if self.vault_address:
+            return
         spot_data = self.rest_info.spot_user_state(self.account_address)
         self.on_query_spot_account(spot_data)
     # ----------------------------------------------------------------------------------------------------
@@ -395,8 +405,9 @@ class HyperliquidRestApi(RestClient):
         查询活动委托单
         """
         account_address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
+        addr = self.vault_address or account_address
         for dex in self.gateway.perp_dexs:
-            data = self.rest_info.frontend_open_orders(account_address,dex)
+            data = self.rest_info.frontend_open_orders(addr,dex)
             self.on_query_order(data)
     # ----------------------------------------------------------------------------------------------------
     def query_contract(self) -> None:
@@ -604,6 +615,42 @@ class HyperliquidRestApi(RestClient):
         if not data or "assetPositions" not in data:
             return
         self.on_query_position(data["assetPositions"],dex)
+        # 主账户USDC资金，USDH资金使用现货资金账户接口获取，这里只获取金库带单资金
+        if dex or not self.vault_address:
+            return
+        account_data = data["marginSummary"]
+        account: AccountData = AccountData(
+            accountid="USDC" + "_" + self.gateway_name,
+            balance=float(account_data["totalRawUsd"]),
+            frozen=float(account_data["totalMarginUsed"]),
+            datetime=get_local_datetime(data["time"]),
+            file_name=self.gateway.account_file_name,
+            gateway_name=self.gateway_name,
+        )
+        account.available = account.balance - account.frozen
+        if account.balance:
+            self.gateway.on_account(account)
+            # 保存账户资金信息
+            self.accounts_info[account.accountid] = account.__dict__
+
+        if not self.accounts_info:
+            return
+        accounts_info = list(self.accounts_info.values())
+        account_date = accounts_info[-1]["datetime"].date()
+        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
+        write_header = not Path(account_path).exists()
+        additional_writing = self.account_date and self.account_date != account_date
+        self.account_date = account_date
+        # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
+        if not write_header and not additional_writing:
+            return
+        write_mode = "w" if write_header else "a"
+        for account_data in accounts_info:
+            with open(account_path, write_mode, newline="") as f1:
+                w1 = csv.DictWriter(f1, list(account_data))
+                if write_header:
+                    w1.writeheader()
+                w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
     def on_query_position(self, data: dict | list,dex:str) -> None:
         """
@@ -874,11 +921,12 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.account_date = None  # 账户日期
         self.accounts_info: Dict[str, dict] = {}
     # ----------------------------------------------------------------------------------------------------
-    def connect(self, account_address: str, private_address: str, proxy_host: str, proxy_port: int) -> None:
+    def connect(self, account_address: str, vault_address:str, private_address: str, proxy_host: str, proxy_port: int) -> None:
         """
         连接Websocket交易频道
         """
         self.account_address = account_address
+        self.vault_address = vault_address
         self.private_address = private_address
         self.ws_info = Info(REST_HOST,perp_dexs=self.gateway.perp_dexs, skip_ws=False)
         self.init(WEBSOCKET_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
@@ -934,16 +982,17 @@ class HyperliquidWebsocketApi(WebsocketClient):
         else:
             subscribe_symbol = req.symbol
         address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
+        addr = self.vault_address or address
         # 订阅深度
         self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
         self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
         self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
-        self.ws_info.subscribe({ "type": "activeAssetData", "user": address, "coin": subscribe_symbol}, self.on_asset_data)
-        self.ws_info.subscribe({"type": "userFills", "user": address}, self.on_trade)
-        self.ws_info.subscribe({"type": "orderUpdates", "user": address}, self.on_order)
+        self.ws_info.subscribe({ "type": "activeAssetData", "user": addr, "coin": subscribe_symbol}, self.on_asset_data)
+        self.ws_info.subscribe({"type": "userFills", "user": addr}, self.on_trade)
+        self.ws_info.subscribe({"type": "orderUpdates", "user": addr}, self.on_order)
         for dex in self.gateway.perp_dexs:
-            self.ws_info.subscribe({"type": "clearinghouseState", "user": address,"dex":dex}, self.on_asset_position)
-            self.ws_info.subscribe({"type": "openOrders", "user": address,"dex":dex}, self.on_open_orders)
+            self.ws_info.subscribe({"type": "clearinghouseState", "user": addr,"dex":dex}, self.on_asset_position)
+            self.ws_info.subscribe({"type": "openOrders", "user": addr,"dex":dex}, self.on_open_orders)
         if self.gateway.book_trade_status:
             # 逐笔委托簿
             self.ws_info.subscribe({"type": "bbo", "coin": subscribe_symbol}, self.on_bbo)
@@ -1199,6 +1248,43 @@ class HyperliquidWebsocketApi(WebsocketClient):
                 avg_price=float(raw["entryPx"]),
                 unrealized_pnl=float(raw["unrealizedPnl"])
             )
+        # 主账户USDC资金，USDH资金使用现货资金账户接口获取，这里只获取金库带单资金
+        if dex or not self.vault_address:
+            return
+        account_data = data["marginSummary"]
+
+        account: AccountData = AccountData(
+            accountid="USDC" + "_" + self.gateway_name,
+            balance=float(account_data["totalRawUsd"]),
+            frozen=float(account_data["totalMarginUsed"]),
+            datetime=get_local_datetime(data["time"]),
+            file_name=self.gateway.account_file_name,
+            gateway_name=self.gateway_name,
+        )
+        account.available = account.balance - account.frozen
+        if account.balance:
+            self.gateway.on_account(account)
+            # 保存账户资金信息
+            self.accounts_info[account.accountid] = account.__dict__
+
+        if not self.accounts_info:
+            return
+        accounts_info = list(self.accounts_info.values())
+        account_date = accounts_info[-1]["datetime"].date()
+        account_path = self.gateway.get_file_path.account_path(self.gateway.account_file_name)
+        write_header = not Path(account_path).exists()
+        additional_writing = self.account_date and self.account_date != account_date
+        self.account_date = account_date
+        # 文件不存在则写入文件头，否则只在日期变更后追加写入文件
+        if not write_header and not additional_writing:
+            return
+        write_mode = "w" if write_header else "a"
+        for account_data in accounts_info:
+            with open(account_path, write_mode, newline="") as f1:
+                w1 = csv.DictWriter(f1, list(account_data))
+                if write_header:
+                    w1.writeheader()
+                w1.writerow(account_data)
     # ----------------------------------------------------------------------------------------------------
     def on_open_orders(self,packet:dict):
         """
