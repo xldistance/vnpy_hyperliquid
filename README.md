@@ -19,7 +19,7 @@ pip install .
 > **注意**:订阅品种示例:现货(UBTC),永续(BTC),股票永续(xyz:NVDA,xyz:JPY,km:US500),其他合约格式可以去vnpy的gui 帮助/查询合约里面查看
 ### 🚫 架构说明
 
-> **注意**: VNPY 原生的 REST API 和 WebSocket API 在此集成中**仅作为接口框架存在**，实际的数据交互完全通过 Hyperliquid 官方 SDK 实现。
+> **注意**: VNPY 原生的 REST API 和 WebSocket API 在此集成中**仅作为接口框架存在**，实际的数据交互完全通过 Hyperliquid SDK 实现。
 
 > **注意**: 推荐安装我修改过的Hyperliquid Python SDK,自定义函数说明如下
 ```python
