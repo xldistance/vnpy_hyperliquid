@@ -12,6 +12,7 @@ pip install .
 ```
 ### 🚫 重要
 > **注意**:默认使用代理api交易，去官方网页/更多/api里面创建代理api，不建议使用私钥交易避免私钥泄露。要使用私钥交易，赋值self.use_api_agent为False。
+> 
 > account_address是钱包的公开地址，private_address是代理api的私钥地址或者钱包的私钥地址。
 >  如果设置了vault_address则只通过金库带单交易，如需交易主账户请移除vault_address参数，赋值金库地址后需移除HL:前缀。
 > 
