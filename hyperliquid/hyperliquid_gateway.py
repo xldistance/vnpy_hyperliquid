@@ -43,7 +43,7 @@ from vnpy.trader.object import (
     TickData,
     TradeData,
 )
-from vnpy.trader.setting import hyperliquid_binance_account  # 导入账户字典
+from vnpy.trader.setting import hyperliquid_vault_account  # 导入账户字典
 from vnpy.trader.utility import (
     TZ_INFO,
     GetFilePath,
@@ -181,7 +181,7 @@ class HyperliquidGateway(BaseGateway):
         连接交易接口
         """
         if not log_account:
-            log_account = hyperliquid_binance_account
+            log_account = hyperliquid_vault_account
         account_address: str = log_account["account_address"]
 
         private_address: str = log_account["private_address"]
@@ -621,7 +621,7 @@ class HyperliquidRestApi(RestClient):
         account_data = data["marginSummary"]
         account: AccountData = AccountData(
             accountid="USDC" + "_" + self.gateway_name,
-            balance=float(account_data["totalRawUsd"]),
+            balance=float(account_data["accountValue"]),
             frozen=float(account_data["totalMarginUsed"]),
             datetime=get_local_datetime(data["time"]),
             file_name=self.gateway.account_file_name,
@@ -816,12 +816,13 @@ class HyperliquidRestApi(RestClient):
         """
         委托下单回报
         """
-        if "error" in data:
-            msg = data["response"] if "response" in data else data
+        if data["status"] == "err":
+            msg = data["response"]
             self.gateway.write_log(f"合约：{order.vt_symbol}发送委托单失败，错误信息：{msg}")
             order.status = Status.REJECTED
             self.gateway.on_order(order)
             return
+
         response = data["response"]["data"]["statuses"][0]
         if "error" in response:
             msg = response["error"]
@@ -1252,10 +1253,9 @@ class HyperliquidWebsocketApi(WebsocketClient):
         if dex or not self.vault_address:
             return
         account_data = data["marginSummary"]
-
         account: AccountData = AccountData(
             accountid="USDC" + "_" + self.gateway_name,
-            balance=float(account_data["totalRawUsd"]),
+            balance=float(account_data["accountValue"]),
             frozen=float(account_data["totalMarginUsed"]),
             datetime=get_local_datetime(data["time"]),
             file_name=self.gateway.account_file_name,
