@@ -23,7 +23,7 @@ class API:
         payload = payload or {}
         url = self.base_url + url_path
         try:
-            response = self.session.post(url, json=payload, timeout=self.timeout)
+            response = self.session.post(url, json=payload, timeout=self.timeout,verify=False)
             status_code = response.status_code
             if status_code // 100 == 2:
                 if status_code == 204:
