@@ -76,7 +76,7 @@ class Info(API):
                 self.set_perp_meta(fresh_meta, offset)
 
     def set_perp_meta(self, meta: Meta, offset: int) -> Any:
-        if "universe" not in meta:
+        if not meta or "universe" not in meta:
             return
         for asset, asset_info in enumerate(meta["universe"]):
             asset += offset
