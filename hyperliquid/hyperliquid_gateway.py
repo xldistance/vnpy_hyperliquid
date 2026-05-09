@@ -43,11 +43,10 @@ from vnpy.trader.object import (
     TickData,
     TradeData,
 )
-from vnpy.trader.setting import hyperliquid_vault_account  # 导入账户字典
+from vnpy.trader.setting import hyperliquid_account_main  # 导入账户字典
 from vnpy.trader.utility import (
     TZ_INFO,
     GetFilePath,
-    delete_dr_data,
     extract_vt_symbol,
     get_symbol_mark,
     get_local_datetime,
@@ -181,7 +180,7 @@ class HyperliquidGateway(BaseGateway):
         连接交易接口
         """
         if not log_account:
-            log_account = hyperliquid_vault_account
+            log_account = hyperliquid_account_main
         account_address: str = log_account["account_address"]
 
         private_address: str = log_account["private_address"]
@@ -816,6 +815,12 @@ class HyperliquidRestApi(RestClient):
         """
         委托下单回报
         """
+        if "error" in data:
+            msg = data["error"]
+            order.status = Status.REJECTED
+            self.gateway.on_order(order)
+            self.gateway.write_log(f"合约：{order.vt_symbol}发送委托单失败，错误信息：{msg}")
+            return
         if data["status"] == "err":
             msg = data["response"]
             self.gateway.write_log(f"合约：{order.vt_symbol}发送委托单失败，错误信息：{msg}")
