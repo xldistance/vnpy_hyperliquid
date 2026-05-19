@@ -160,8 +160,10 @@ class HyperliquidGateway(BaseGateway):
         self.recording_list = [vt_symbol for vt_symbol in self.recording_list if is_target_contract(vt_symbol, self.gateway_name)]
         # 查询历史数据合约列表
         self.history_contracts = copy(self.recording_list)
-        # 查询历史数据状态
+        # 下载历史数据状态
         self.history_status = True
+        # 识别mmap发布进程状态
+        self.publish_status = True
         # 订阅逐笔成交数据状态
         self.book_trade_status: bool = False
         self.count:int = 0
@@ -196,7 +198,7 @@ class HyperliquidGateway(BaseGateway):
         if "vault_address" in log_account:
             vault_address = log_account["vault_address"]
         else:
-            vault_address = None
+            vault_address = ""
         self.exchange_info = HyperliquidExchange(account, REST_HOST, perp_dexs=self.perp_dexs, account_address=account_address,vault_address = vault_address, timeout=60)
         self.rest_api.connect(account_address,vault_address,private_address,proxy_host,proxy_port)
         self.ws_api.connect(account_address,vault_address,private_address,proxy_host,proxy_port)
@@ -279,9 +281,10 @@ class HyperliquidGateway(BaseGateway):
                 end=datetime.now(TZ_INFO),
                 gateway_name=self.gateway_name,
             )
-            self.rest_api.query_history(req)
+            # 只在mmap发布进程运行或者手动设置history_status为True时才下载历史数据
+            if self.history_status:
+                self.rest_api.query_history(req)
             self.rest_api.set_leverage(symbol,exchange)
-            sleep(1)
     # ----------------------------------------------------------------------------------------------------
     def process_timer_event(self, event) -> None:
         """
@@ -310,8 +313,7 @@ class HyperliquidGateway(BaseGateway):
     def init_query(self):
         """ """
         self.event_engine.register(EVENT_TIMER, self.process_timer_event)
-        if self.history_status:
-            self.event_engine.register(EVENT_TIMER, self.query_history)
+        self.event_engine.register(EVENT_TIMER, self.query_history)
     # ----------------------------------------------------------------------------------------------------
     def close(self) -> None:
         """
@@ -374,19 +376,21 @@ class HyperliquidRestApi(RestClient):
         self.account_address = account_address
         self.vault_address = vault_address
         self.private_address = private_address
+        # 账户字典有金库带单地址，则交易带单账户，否则走主账户
+        self.trade_address = self.vault_address or self.account_address
         self.init(REST_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.rest_info = Info(REST_HOST,perp_dexs=self.gateway.perp_dexs, skip_ws=True, timeout=60)
         self.start()
         self.gateway.write_log(f"交易接口：{self.gateway_name}，REST API启动成功")
+        # mmap发布进程和订阅进程都必须获取合约数据，有的交易所发送委托单需要合约数据
         self.query_contract()
     # ----------------------------------------------------------------------------------------------------
     def query_account(self) -> None:
         """
         查询永续账户资金
         """
-        addr = self.vault_address or self.account_address
         for dex in self.gateway.perp_dexs:
-            data = self.rest_info.user_state(addr,dex)
+            data = self.rest_info.user_state(self.trade_address ,dex)
             self.on_query_account(data,dex)
     # ----------------------------------------------------------------------------------------------------        
     def query_spot_account(self) -> None:
@@ -403,10 +407,8 @@ class HyperliquidRestApi(RestClient):
         """
         查询活动委托单
         """
-        account_address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
-        addr = self.vault_address or account_address
         for dex in self.gateway.perp_dexs:
-            data = self.rest_info.frontend_open_orders(addr,dex)
+            data = self.rest_info.frontend_open_orders(self.trade_address,dex)
             self.on_query_order(data)
     # ----------------------------------------------------------------------------------------------------
     def query_contract(self) -> None:
@@ -440,9 +442,15 @@ class HyperliquidRestApi(RestClient):
         """
         生成本地委托号
         """
-        with self.order_count_lock:
+        acquired = self.order_count_lock.acquire(timeout=3)
+        if not acquired:
+            self.write_log(f"交易接口：{self.gateway_name}，生成委托单id获取锁超时")
+        try:
             self.order_count += 1
             return self.order_count
+        finally:
+            if acquired:
+                self.order_count_lock.release()
     # ----------------------------------------------------------------------------------------------------
     def send_order(self, req: OrderRequest) -> str:
         """
@@ -934,6 +942,8 @@ class HyperliquidWebsocketApi(WebsocketClient):
         self.account_address = account_address
         self.vault_address = vault_address
         self.private_address = private_address
+        # 账户字典有金库带单地址，则交易带单账户，否则走主账户
+        self.trade_address = self.vault_address or self.account_address
         self.ws_info = Info(REST_HOST,perp_dexs=self.gateway.perp_dexs, skip_ws=False)
         self.init(WEBSOCKET_HOST, proxy_host, proxy_port, gateway_name=self.gateway_name)
         self.start()
@@ -959,6 +969,8 @@ class HyperliquidWebsocketApi(WebsocketClient):
 
         for req in list(self.subscribed.values()):
             self.subscribe(req)
+        
+        self.subscribe_private()
     # ----------------------------------------------------------------------------------------------------
     def on_disconnected(self) -> None:
         """
@@ -987,21 +999,26 @@ class HyperliquidWebsocketApi(WebsocketClient):
             subscribe_symbol = self.gateway.rest_api.spot_symbol_name_map[req.symbol]
         else:
             subscribe_symbol = req.symbol
-        address = self.account_address if self.gateway.use_api_agent else self.gateway.exchange_info.wallet.address
-        addr = self.vault_address or address
-        # 订阅深度
-        self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
-        self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
-        self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
-        self.ws_info.subscribe({ "type": "activeAssetData", "user": addr, "coin": subscribe_symbol}, self.on_asset_data)
-        self.ws_info.subscribe({"type": "userFills", "user": addr}, self.on_trade)
-        self.ws_info.subscribe({"type": "orderUpdates", "user": addr}, self.on_order)
+        # 只有mmap发布进程才订阅行情数据
+        if self.gateway.publish_status:
+            # 订阅深度
+            self.ws_info.subscribe({'type': 'l2Book', 'coin': subscribe_symbol}, self.on_depth)
+            self.ws_info.subscribe({ "type": "trades", "coin": subscribe_symbol}, self.on_public_trade)
+            self.ws_info.subscribe({ "type": "activeAssetCtx", "coin": subscribe_symbol}, self.on_asset_ctx)
+            self.ws_info.subscribe({ "type": "activeAssetData", "user": self.trade_address, "coin": subscribe_symbol}, self.on_asset_data)
+            if self.gateway.book_trade_status:
+                # 逐笔委托簿
+                self.ws_info.subscribe({"type": "bbo", "coin": subscribe_symbol}, self.on_bbo)
+    # ----------------------------------------------------------------------------------------------------
+    def subscribe_private(self) -> None:
+        """
+        订阅私有频道
+        """
+        self.ws_info.subscribe({"type": "userFills", "user": self.trade_address}, self.on_trade)
+        self.ws_info.subscribe({"type": "orderUpdates", "user": self.trade_address}, self.on_order)
         for dex in self.gateway.perp_dexs:
-            self.ws_info.subscribe({"type": "clearinghouseState", "user": addr,"dex":dex}, self.on_asset_position)
-            self.ws_info.subscribe({"type": "openOrders", "user": addr,"dex":dex}, self.on_open_orders)
-        if self.gateway.book_trade_status:
-            # 逐笔委托簿
-            self.ws_info.subscribe({"type": "bbo", "coin": subscribe_symbol}, self.on_bbo)
+            self.ws_info.subscribe({"type": "clearinghouseState", "user": self.trade_address,"dex":dex}, self.on_asset_position)
+            self.ws_info.subscribe({"type": "openOrders", "user": self.trade_address,"dex":dex}, self.on_open_orders)
     # ----------------------------------------------------------------------------------------------------
     def on_packet(self, packet: Any) -> None:
         """
